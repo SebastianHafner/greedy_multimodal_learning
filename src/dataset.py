@@ -1,107 +1,25 @@
 import numpy as np
-import glob
 import torch.utils.data
 import os
-import math
-import pandas as pd
-from skimage import io, transform, util
-from PIL import Image
 import torch
-import torchvision as vision
-from torchvision import transforms, datasets
+from torchvision import transforms
 import random
 import gin
-from gin.config import _CONFIG
-import copy
+from pathlib import Path
+import json
 
-import timeit
 
 SEED_FIXED = 100000
-
-def load_modelviews(files):
-    imgs = []
-    for f in files:
-        im = np.array(Image.open(f).convert('RGB'))
-        imgs.append(im)
-    return np.stack(imgs)
-            
-def load_modelinto_numpy(root_dir, classnames, ending='/*.png', numviews = 12):
-    set_ = root_dir.split('/')[-1]
-    parent_dir = root_dir.rsplit('/',2)[0]
-    filepaths = []
-    
-    data = []
-    labels = []
-    
-    for i in range(len(classnames)):
-        all_files = sorted(glob.glob(parent_dir+'/'+classnames[i]+'/'+set_+ending))
-        
-        nummodels = int(len(all_files)/12)
-        print('Transformming %d models of class %d - %s into tensor'%(nummodels, i, classnames[i]))
-        starting_time = timeit.default_timer()
-        
-        for m_ind in range(nummodels):
-            modelimgs = load_modelviews(all_files[m_ind*12:m_ind*12+12])
-            #print(all_files[m_ind*12].rsplit('.',2)[0]+'.npy')
-            with open(all_files[m_ind*12].rsplit('.',2)[0]+'.npy', 'wb') as f:
-                torch.save(modelimgs, f)
-        
-        print('... finished in %.2fs'%(timeit.default_timer() - starting_time))
-
-
-class MultiviewModelDataset(torch.utils.data.Dataset):
-    def __init__(self, root_dir, ending='/*.png',
-                 num_views=12, shuffle=True, specific_view=None, transform=None):
-
-        self.classnames=['airplane','bathtub','bed','bench','bookshelf','bottle','bowl','car','chair',
-                         'cone','cup','curtain','desk','door','dresser','flower_pot','glass_box',
-                         'guitar','keyboard','lamp','laptop','mantel','monitor','night_stand',
-                         'person','piano','plant','radio','range_hood','sink','sofa','stairs',
-                         'stool','table','tent','toilet','tv_stand','vase','wardrobe','xbox']
-        self.root_dir = root_dir
-        
-        self.num_views = num_views
-        self.specific_view = specific_view
-
-        self.transform = transform
-        self.init_filepaths(ending)
-
-    def init_filepaths(self, ending):
-        self.filepaths = []
-        for i in range(len(self.classnames)):
-            all_files = sorted(glob.glob(self.root_dir.rsplit('/',2)[0]+'/'+self.classnames[i]+'/'+self.root_dir.split('/')[-1]+ending))
-            files = [] 
-            for file in all_files:
-                files.append(file.split('.obj.')[0])
-                
-            files = list(np.unique(np.array(files)))
-            self.filepaths.extend(files)
-    
-    def __len__(self):
-        return len(self.filepaths)
-
-    def __getitem__(self, idx):
-        path = self.filepaths[idx]
-        class_name = path.split('/')[-3]
-        class_id = self.classnames.index(class_name)
-        imgs = torch.load(path+'.obj.npy')
-        trans_imgs = []
-        for img, view in zip(imgs[self.specific_view], self.specific_view):
-            if self.transform:
-                img = self.transform(img)
-            trans_imgs.append(img) 
-        data = torch.stack(trans_imgs)
-        return idx, data, class_id
     
 
 @gin.configurable 
 def get_mvdcndata(
-        ending = '/*.png',
-        root_dir = os.environ['DATA_DIR'], 
-        make_npy_files = False,
+        ending='.png',
+        root_dir=os.environ['DATA_DIR'],
+        make_npy_files=False,
         valid_size=0.2,
         batch_size=8,
-        random_seed_for_validation = 10,
+        random_seed_for_validation=10,
         num_views=12,
         num_workers=0,
         specific_views=None,
@@ -111,23 +29,14 @@ def get_mvdcndata(
     random.seed(seed)
     np.random.seed(seed) # cpu vars
     torch.manual_seed(seed) # cpu  vars
-    if use_cuda: torch.cuda.manual_seed_all(seed)
+    if use_cuda:
+        torch.cuda.manual_seed_all(seed)
     
     test_transform = transforms.Compose([
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
-            ]) 
-
-    if make_npy_files:
-        classnames = ['airplane','bathtub','bed','bench','bookshelf','bottle','bowl','car','chair',
-                     'cone','cup','curtain','desk','door','dresser','flower_pot','glass_box',
-                     'guitar','keyboard','lamp','laptop','mantel','monitor','night_stand',
-                     'person','piano','plant','radio','range_hood','sink','sofa','stairs',
-                     'stool','table','tent','toilet','tv_stand','vase','wardrobe','xbox']
-
-        load_modelinto_numpy(os.path.join(root_dir, '*/test'), classnames, ending='/*.png', numviews = 12)
-        load_modelinto_numpy(os.path.join(root_dir, '*/train'), classnames, ending='/*.png', numviews = 12)
+            ])
 
     train_transform = transforms.Compose([
             transforms.ToPILImage(),
@@ -137,7 +46,7 @@ def get_mvdcndata(
                                  std=[0.229, 0.224, 0.225])
         ])
 
-    test_dataset = MultiviewModelDataset(os.path.join(root_dir, '*', 'test'),
+    test_dataset = MultiviewModelDataset(root_dir, 'test',
         ending=ending,
         num_views=num_views, 
         specific_view=specific_views, 
@@ -148,7 +57,7 @@ def get_mvdcndata(
         shuffle=False, 
         num_workers=num_workers)
 
-    training = MultiviewModelDataset(os.path.join(root_dir, '*', 'train'), 
+    training = MultiviewModelDataset(root_dir, 'train',
         ending=ending, 
         num_views=num_views, 
         specific_view=specific_views, 
@@ -183,7 +92,37 @@ def get_mvdcndata(
     return training_loader, valid_loader, test_loader
 
 
+class MultiviewModelDataset(torch.utils.data.Dataset):
+    def __init__(self, root_dir, split, ending='.png',
+                 num_views=12, shuffle=True, specific_view=None, transform=None):
 
+        self.root_dir = Path(root_dir)
+        metadata_file = Path(root_dir) / 'metadata.json'
+        with open(str(metadata_file)) as f:
+            self.metadata = json.load(f)
 
+        self.samples = self.metadata[split]
+        self.classnames = self.metadata['classnames']
+        self.split = split
 
-    
+        self.num_views = num_views
+        self.specific_view = specific_view
+
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        sample = self.samples[idx]
+        classname = sample['classname']
+        model = sample['model']
+        class_id = self.classnames.index(classname)
+        imgs = torch.load(self.root_dir / self.split / f'{model}.npy')
+        trans_imgs = []
+        for img, view in zip(imgs[self.specific_view], self.specific_view):
+            if self.transform:
+                img = self.transform(img)
+            trans_imgs.append(img)
+        data = torch.stack(trans_imgs)
+        return idx, data, class_id

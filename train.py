@@ -4,6 +4,7 @@
 Trainer script. Example run command: train.py save_to_folder configs/cnn.gin.
 """
 import os
+os.environ['DATA_DIR'] = 'C:/Users/shafner/datasets/ModelNet40/preprocessed'
 import gin
 from gin.config import _CONFIG
 import torch

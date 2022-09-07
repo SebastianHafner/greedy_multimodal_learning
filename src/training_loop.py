@@ -20,8 +20,8 @@ from src.framework import Model_
 
 logger = logging.getLogger(__name__)
 
-types_of_instance_to_save_in_csv = (int, float, complex, np.int64, np.int32, np.float32, np.float64, np.float128, str)
-types_of_instance_to_save_in_history = (int, float, complex, np.int64, np.int32, np.float32, np.float64, np.ndarray, np.float128,str)
+types_of_instance_to_save_in_csv = (int, float, complex, np.int64, np.int32, np.float32, np.float64, str)
+types_of_instance_to_save_in_history = (int, float, complex, np.int64, np.int32, np.float32, np.float64, np.ndarray, str)
 
 def _construct_default_callbacks(model, optimizer, H, save_path, checkpoint_monitor, save_with_structure=False):
     callbacks = []
