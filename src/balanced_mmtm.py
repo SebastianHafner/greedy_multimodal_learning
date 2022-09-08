@@ -15,84 +15,83 @@ from src.utils import numpy_to_torch, torch_to
 @gin.configurable
 class MMTM_mitigate(nn.Module):
     def __init__(self, 
-            dim_visual, 
-            dim_skeleton, 
+            dim_sar,
+            dim_opt,
             ratio, 
             device=0,
             SEonly=False, 
             shareweight=False):
         super(MMTM_mitigate, self).__init__()
-        dim = dim_visual + dim_skeleton
+        dim = dim_sar + dim_opt
         dim_out = int(2*dim/ratio)
         self.SEonly = SEonly
         self.shareweight = shareweight
 
-        self.running_avg_weight_visual = torch.zeros(dim_visual).to("cuda:{}".format(device))
-        self.running_avg_weight_skeleton = torch.zeros(dim_visual).to("cuda:{}".format(device))
+        self.running_avg_weight_sar = torch.zeros(dim_sar).to("cuda:{}".format(device))
+        self.running_avg_weight_opt = torch.zeros(dim_opt).to("cuda:{}".format(device))
         self.step = 0
 
         if self.SEonly:
-            self.fc_squeeze_visual = nn.Linear(dim_visual, dim_out)
-            self.fc_squeeze_skeleton = nn.Linear(dim_skeleton, dim_out)
+            self.fc_squeeze_sar = nn.Linear(dim_sar, dim_out)
+            self.fc_squeeze_opt = nn.Linear(dim_opt, dim_out)
         else:    
             self.fc_squeeze = nn.Linear(dim, dim_out)
 
         if self.shareweight:
-            assert dim_visual == dim_skeleton
-            self.fc_excite = nn.Linear(dim_out, dim_visual)
+            assert dim_sar == dim_opt
+            self.fc_excite = nn.Linear(dim_out, dim_sar)
         else:
-            self.fc_visual = nn.Linear(dim_out, dim_visual)
-            self.fc_skeleton = nn.Linear(dim_out, dim_skeleton)
+            self.fc_sar = nn.Linear(dim_out, dim_sar)
+            self.fc_opt = nn.Linear(dim_out, dim_opt)
         self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, 
-                visual, 
-                skeleton, 
+                sar,
+                opt,
                 return_scale=False,
-                return_squeezed_mps = False,
-                turnoff_cross_modal_flow = False,
-                average_squeezemaps = None,
+                return_squeezed_mps=False,
+                turnoff_cross_modal_flow=False,
+                average_squeezemaps=None,
                 curation_mode=False,
                 caring_modality=0,
                 ):
 
         if self.SEonly:
-            tview = visual.view(visual.shape[:2] + (-1,))
+            tview = sar.view(sar.shape[:2] + (-1,))
             squeeze = torch.mean(tview, dim=-1)
-            excitation = self.fc_squeeze_visual(squeeze)
-            vis_out = self.fc_visual(self.relu(excitation))
+            excitation = self.fc_squeeze_sar(squeeze)
+            sar_out = self.fc_sar(self.relu(excitation))
 
-            tview = skeleton.view(skeleton.shape[:2] + (-1,))
+            tview = opt.view(opt.shape[:2] + (-1,))
             squeeze = torch.mean(tview, dim=-1)
-            excitation = self.fc_squeeze_skeleton(squeeze)
-            sk_out = self.fc_skeleton(self.relu(excitation))
+            excitation = self.fc_squeeze_opt(squeeze)
+            opt_out = self.fc_opt(self.relu(excitation))
 
         else:
             if turnoff_cross_modal_flow:
-
-                tview = visual.view(visual.shape[:2] + (-1,))
+                tview = sar.view(sar.shape[:2] + (-1,))
                 squeeze = torch.cat([torch.mean(tview, dim=-1), 
-                    torch.stack(visual.shape[0]*[average_squeezemaps[1]])], 1)
+                    torch.stack(sar.shape[0]*[average_squeezemaps[1]])], 1)
                 excitation = self.relu(self.fc_squeeze(squeeze))
 
                 if self.shareweight:
-                    vis_out = self.fc_excite(excitation)
+                    sar_out = self.fc_excite(excitation)
                 else:
-                    vis_out = self.fc_visual(excitation)
+                    sar_out = self.fc_sar(excitation)
 
-                tview = skeleton.view(skeleton.shape[:2] + (-1,))
-                squeeze = torch.cat([torch.stack(skeleton.shape[0]*[average_squeezemaps[0]]), 
+                tview = opt.view(opt.shape[:2] + (-1,))
+                squeeze = torch.cat([torch.stack(opt.shape[0]*[average_squeezemaps[0]]),
                     torch.mean(tview, dim=-1)], 1)
                 excitation = self.relu(self.fc_squeeze(squeeze))
                 if self.shareweight:
-                    sk_out = self.fc_excite(excitation)
+                    opt_out = self.fc_excite(excitation)
                 else:
-                    sk_out = self.fc_skeleton(excitation)
+                    opt_out = self.fc_opt(excitation)
 
             else: 
                 squeeze_array = []
-                for tensor in [visual, skeleton]:
+                for tensor in [sar, opt]:
                     tview = tensor.view(tensor.shape[:2] + (-1,))
                     squeeze_array.append(torch.mean(tview, dim=-1))
 
@@ -101,22 +100,22 @@ class MMTM_mitigate(nn.Module):
                 excitation = self.relu(excitation)
 
                 if self.shareweight:
-                    sk_out = self.fc_excite(excitation)
-                    vis_out = self.fc_excite(excitation)
+                    sar_out = self.fc_excite(excitation)
+                    opt_out = self.fc_excite(excitation)
                 else:
-                    vis_out = self.fc_visual(excitation)
-                    sk_out = self.fc_skeleton(excitation)
+                    sar_out = self.fc_sar(excitation)
+                    opt_out = self.fc_opt(excitation)
 
-        vis_out = self.sigmoid(vis_out)
-        sk_out = self.sigmoid(sk_out)
+        sar_out = self.sigmoid(sar_out)
+        opt_out = self.sigmoid(opt_out)
 
-        self.running_avg_weight_visual = (vis_out.mean(0) + self.running_avg_weight_visual*self.step).detach()/(self.step+1)
-        self.running_avg_weight_skeleton = (vis_out.mean(0) + self.running_avg_weight_skeleton*self.step).detach()/(self.step+1)
+        self.running_avg_weight_sar = (sar_out.mean(0) + self.running_avg_weight_sar*self.step).detach()/(self.step+1)
+        self.running_avg_weight_opt = (opt_out.mean(0) + self.running_avg_weight_opt*self.step).detach()/(self.step+1)
         
-        self.step +=1
+        self.step += 1
 
         if return_scale:
-            scales = [vis_out.cpu(), sk_out.cpu()]
+            scales = [sar_out.cpu(), opt_out.cpu()]
         else:
             scales = None
 
@@ -126,32 +125,32 @@ class MMTM_mitigate(nn.Module):
             squeeze_array = None
 
         if not curation_mode:
-            dim_diff = len(visual.shape) - len(vis_out.shape)
-            vis_out = vis_out.view(vis_out.shape + (1,) * dim_diff)
+            dim_diff = len(sar.shape) - len(sar_out.shape)
+            sar_out = sar_out.view(sar_out.shape + (1,) * dim_diff)
 
-            dim_diff = len(skeleton.shape) - len(sk_out.shape)
-            sk_out = sk_out.view(sk_out.shape + (1,) * dim_diff)
+            dim_diff = len(opt.shape) - len(opt_out.shape)
+            opt_out = opt_out.view(opt_out.shape + (1,) * dim_diff)
         
         else:
-            if caring_modality==0:
-                dim_diff = len(skeleton.shape) - len(sk_out.shape)
-                sk_out = sk_out.view(sk_out.shape + (1,) * dim_diff)
+            if caring_modality == 0:
+                dim_diff = len(opt.shape) - len(opt_out.shape)
+                opt_out = opt_out.view(opt_out.shape + (1,) * dim_diff)
 
-                dim_diff = len(visual.shape) - len(vis_out.shape)
-                vis_out = torch.stack(vis_out.shape[0]*[
-                        self.running_avg_weight_visual
-                    ]).view(vis_out.shape + (1,) * dim_diff)
+                dim_diff = len(sar.shape) - len(sar_out.shape)
+                sar_out = torch.stack(sar_out.shape[0]*[
+                        self.running_avg_weight_sar
+                    ]).view(sar_out.shape + (1,) * dim_diff)
                 
-            elif caring_modality==1:
-                dim_diff = len(visual.shape) - len(vis_out.shape)
-                vis_out = vis_out.view(vis_out.shape + (1,) * dim_diff)
+            elif caring_modality == 1:
+                dim_diff = len(sar.shape) - len(sar_out.shape)
+                sar_out = sar_out.view(sar_out.shape + (1,) * dim_diff)
 
-                dim_diff = len(skeleton.shape) - len(sk_out.shape)
-                sk_out = torch.stack(sk_out.shape[0]*[
-                        self.running_avg_weight_skeleton
-                    ]).view(sk_out.shape + (1,) * dim_diff)
+                dim_diff = len(opt.shape) - len(opt_out.shape)
+                opt_out = torch.stack(opt_out.shape[0]*[
+                        self.running_avg_weight_opt
+                    ]).view(opt_out.shape + (1,) * dim_diff)
 
-        return visual * vis_out, skeleton * sk_out, scales, squeeze_array
+        return sar * sar_out, opt * opt_out, scales, squeeze_array
 
 
 def get_mmtm_outputs(eval_save_path, mmtm_recorded, key):

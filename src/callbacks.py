@@ -202,25 +202,25 @@ class Bias_Mitigation_Strong(Callback):
 
         for name, parameter in self.model.named_parameters():
             wn = (parameter ** 2).sum().item()
-            gn = (parameter.grad.data ** 2).sum().item()#(grad ** 2).sum().item()
+            gn = (parameter.grad.data ** 2).sum().item()  # (grad ** 2).sum().item()
 
             if 'mmtm' in name:
-                shared=True
+                shared = True
                 for ind, modal in enumerate(self.MMTMnames):
                     if modal in name: 
-                        wn_bypass[ind]+=wn
-                        gn_bypass[ind]+=gn
-                        shared=False
+                        wn_bypass[ind] += wn
+                        gn_bypass[ind] += gn
+                        shared = False
                 if shared:
                     for ind, modal in enumerate(self.MMTMnames):
-                        wn_bypass[ind]+=wn
-                        gn_bypass[ind]+=gn
+                        wn_bypass[ind] += wn
+                        gn_bypass[ind] += gn
 
             else:
                 for ind, modal in enumerate(self.branchnames):
                     if modal in name: 
-                        wn_main[ind]+=wn
-                        gn_main[ind]+=gn
+                        wn_main[ind] += wn
+                        gn_main[ind] += gn
 
         self.M_bypass_modal_0 += gn_bypass[0]/wn_bypass[0]
         self.M_bypass_modal_1 += gn_bypass[1]/wn_bypass[1]
@@ -241,21 +241,21 @@ class Bias_Mitigation_Strong(Callback):
         if self.unlock:
             if not self.model_pytoune.curation_mode:
                 self.d_BDR = self.compute_BDR()
-                if abs(self.d_BDR)>self.epsilon:
-                    biased_direction=np.sign(self.d_BDR)
+                if abs(self.d_BDR) > self.epsilon:
+                    biased_direction = np.sign(self.d_BDR)
                     self.model_pytoune.curation_mode = True
                     self.curation_step = 0
 
-                    if biased_direction==-1: #BDR0<BDR1
+                    if biased_direction == -1:  # BDR0 < BDR1
                         self.model_pytoune.caring_modality = 1
-                    elif biased_direction==1: #BDR0>BDR1
+                    elif biased_direction == 1:  # BDR0 > BDR1
                         self.model_pytoune.caring_modality = 0 
                 else:
                     self.model_pytoune.curation_mode = False 
                     self.model_pytoune.caring_modality = 0 
             else:
-                self.curation_step +=1
-                if self.curation_step==self.curation_windowsize:
+                self.curation_step += 1
+                if self.curation_step == self.curation_windowsize:
                     self.model_pytoune.curation_mode=False
         else:
             self.d_BDR = self.compute_BDR()
@@ -263,8 +263,8 @@ class Bias_Mitigation_Strong(Callback):
             self.model_pytoune.caring_modality = 0 
 
     def on_epoch_begin(self, epoch, logs):
-        if epoch>=self.starting_epoch:
-            self.unlock=True
+        if epoch >= self.starting_epoch:
+            self.unlock = True
 
 @gin.configurable
 class Bias_Mitigation_Random(Callback):
@@ -272,8 +272,8 @@ class Bias_Mitigation_Random(Callback):
     def on_train_begin(self, logs):
         self.model_pytoune.curation_mode = False 
         self.model_pytoune.caring_modality = None
-        self.unlock=False
-        self.starting_epoch=2
+        self.unlock = False
+        self.starting_epoch = 2
 
     def on_batch_end(self, batch, logs):
         logs['curation_mode'] = float(self.model_pytoune.curation_mode)
@@ -282,11 +282,11 @@ class Bias_Mitigation_Random(Callback):
     def on_backward_end(self, batch):
         if self.unlock:
             
-            mode=random.choice([0,1,2])
-            if mode==0:
+            mode=random.choice([0, 1, 2])
+            if mode == 0:
                 self.model_pytoune.curation_mode = False 
                 self.model_pytoune.caring_modality = 0
-            elif mode==1:
+            elif mode == 1:
                 self.model_pytoune.curation_mode = True
                 self.model_pytoune.caring_modality = 1
             else:

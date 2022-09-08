@@ -48,13 +48,7 @@ class StepIterator:
         self.extra_lists = {}
         self.indices_list = []
 
-        self.defaultfields = ['indices',
-                              'loss', 
-                              'metrics', 
-                              'viewwises_metrics', 
-                              'number',
-                              'size'
-                              ]
+        self.defaultfields = ['indices', 'loss', 'metrics', 'viewwises_metrics', 'number', 'size']
 
     @property
     def loss(self):
@@ -96,7 +90,7 @@ class StepIterator:
 
             self.losses_sum += step_data['loss'] * step_data['size']
             self.metrics_sum += step_data['metrics'] * step_data['size']
-            self.metrics_permodal_sum += step_data['viewwises_metrics'] * step_data['size']
+            self.metrics_permodal_sum += step_data['modalitywise_metrics'] * step_data['size']
             self.sizes_sum += step_data['size']
             self.indices_list.append(step_data['indices'])
 
@@ -104,7 +98,7 @@ class StepIterator:
 
             for i in range(self.nummodalities):
                 names = [f'{x}_modal_{i}' for x in self.metrics_names]
-                metrics_dict.update(dict(zip(names, step_data['viewwises_metrics'][i])))
+                metrics_dict.update(dict(zip(names, step_data['modalitywise_metrics'][i])))
 
             for key, value in step_data.items():
                 if key not in self.defaultfields:
@@ -143,7 +137,7 @@ class Model_:
 
         self.minibatch_data = (x, y)
 
-        pred_y_eval, pred_y, scales, squeezed_mps  = self.model(*x, 
+        pred_y_eval, pred_y, scales, squeezed_mps = self.model(*x,
             curation_mode=self.curation_mode, 
             caring_modality=self.caring_modality)
 
@@ -152,8 +146,8 @@ class Model_:
         record = {} 
 
         with torch.no_grad():
-            record['metrics'] = self._compute_metrics(pred_y_eval, y)
-            record['viewwises_metrics'] = self._compute_metrics_multiple_inputs(pred_y, y)
+            record['metrics'] = self._compute_metrics(y, pred_y_eval)
+            record['modalitywise_metrics'] = self._compute_metrics_multiple_inputs(y, pred_y)
 
         if self.model.saving_mmtm_scales:
             record['mmtmscales_list'] = scales
@@ -168,11 +162,11 @@ class Model_:
             args = torch_to(args, self.device)
         return args[0] if len(args) == 1 else args
 
-    def _compute_metrics(self, pred_y, y):
-        return np.array([float(metric(pred_y, y)) for metric in self.metrics])
+    def _compute_metrics(self, y, pred_y):
+        return np.array([float(metric(y, pred_y)) for metric in self.metrics])
 
-    def _compute_metrics_multiple_inputs(self, list_pred_y, y):
-        return np.array([self._compute_metrics(pred_y, y) for pred_y in list_pred_y])
+    def _compute_metrics_multiple_inputs(self, y, list_pred_y):
+        return np.array([self._compute_metrics(y, pred_y) for pred_y in list_pred_y])
 
     def _get_batch_size(self, x, y):
         if torch.is_tensor(x) or isinstance(x, np.ndarray):
@@ -321,10 +315,12 @@ class Model_:
                     if math.isnan(step['loss']): 
                         self.stop_training = True
 
-            train_dict = {'loss': train_step_iterator.loss, 
-                    'train_indices': train_step_iterator.indices,
-                    **{f'train_{k}':v for k, v in train_step_iterator.extra_lists.items()},
-                    **train_step_iterator.metrics}
+            train_dict = {
+                'loss': train_step_iterator.loss,
+                'train_indices': train_step_iterator.indices,
+                **{f'train_{k}': v for k, v in train_step_iterator.extra_lists.items()},
+                **train_step_iterator.metrics
+            }
             
             # validation
             val_dict = self._eval_generator(valid_generator, 'val', steps=validation_steps)

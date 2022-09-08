@@ -7,122 +7,208 @@ import random
 import gin
 from pathlib import Path
 import json
+import tifffile
+import src.augmentation as aug
 
 
 SEED_FIXED = 100000
     
 
 @gin.configurable 
-def get_mvdcndata(
-        ending='.png',
+def get_urbanmappingdata(
         root_dir=os.environ['DATA_DIR'],
-        make_npy_files=False,
-        valid_size=0.2,
+        sar_bands=['VV', 'VH'],
+        opt_bands=['B2', 'B3', 'B4', 'B8'],
         batch_size=8,
-        random_seed_for_validation=10,
-        num_views=12,
         num_workers=0,
-        specific_views=None,
-        seed=777,
-        use_cuda=True,
-        ):
+        seed=7,
+        use_cuda=True):
+
     random.seed(seed)
     np.random.seed(seed) # cpu vars
     torch.manual_seed(seed) # cpu  vars
     if use_cuda:
         torch.cuda.manual_seed_all(seed)
     
-    test_transform = transforms.Compose([
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-            ])
-
-    train_transform = transforms.Compose([
-            transforms.ToPILImage(),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                 std=[0.229, 0.224, 0.225])
+    evaluation_transform = transforms.Compose([
+            aug.Numpy2Torch()
         ])
 
-    test_dataset = MultiviewModelDataset(root_dir, 'test',
-        ending=ending,
-        num_views=num_views, 
-        specific_view=specific_views, 
-        transform=test_transform)
+    train_transform = transforms.Compose([
+            aug.ImageCrop(256),
+            aug.RandomFlip(),
+            aug.RandomRotate(),
+            aug.Numpy2Torch(),
+        ])
 
-    test_loader = torch.utils.data.DataLoader(test_dataset, 
-        batch_size=batch_size, 
-        shuffle=False, 
-        num_workers=num_workers)
+    train_dataset = UrbanExtractionDataset(root_dir, 'train', sar_bands, opt_bands, train_transform)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
+                                                  num_workers=num_workers)
 
-    training = MultiviewModelDataset(root_dir, 'train',
-        ending=ending, 
-        num_views=num_views, 
-        specific_view=specific_views, 
-        transform=train_transform)
+    val_dataset = UrbanExtractionDataset(root_dir, 'val', sar_bands, opt_bands, evaluation_transform)
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
-    num_train = len(training)
-    indices = list(range(num_train))
-    training_idx = indices
+    test_dataset = UrbanExtractionDataset(root_dir, 'test', sar_bands, opt_bands, evaluation_transform)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
+                                              num_workers=num_workers)
 
-    error_msg = "[!] valid_size should be in the range [0, 1]."
-    assert ((valid_size >= 0) and (valid_size <= 1)), error_msg
-    
-    split = int(np.floor(valid_size * num_train))
-    random.Random(random_seed_for_validation).shuffle(indices)
-    training_idx, valid_idx = indices[split:], indices[:split]
-    
-    valid_sub = torch.utils.data.Subset(training, valid_idx)
-    valid_loader = torch.utils.data.DataLoader(valid_sub,
-                       batch_size=batch_size,
-                       shuffle=False,
-                       num_workers=num_workers,
-                       ) 
-
-    training_sub = torch.utils.data.Subset(training, training_idx)
-
-    training_loader = torch.utils.data.DataLoader(training_sub,
-                                                   batch_size=batch_size,
-                                                   shuffle=True,
-                                                   num_workers=num_workers,
-                                                   ) 
-    
-    return training_loader, valid_loader, test_loader
+    return train_loader, val_loader, test_loader
 
 
-class MultiviewModelDataset(torch.utils.data.Dataset):
-    def __init__(self, root_dir, split, ending='.png',
-                 num_views=12, shuffle=True, specific_view=None, transform=None):
+# dataset for urban extraction with building footprints
+class UrbanExtractionDataset(torch.utils.data.Dataset):
+    def __init__(self, root_dir: str, split: str, sar_bands: list, opt_bands: list, transform=None):
 
         self.root_dir = Path(root_dir)
-        metadata_file = Path(root_dir) / 'metadata.json'
-        with open(str(metadata_file)) as f:
-            self.metadata = json.load(f)
 
-        self.samples = self.metadata[split]
-        self.classnames = self.metadata['classnames']
+        # creating boolean feature vector to subset sentinel 1 and sentinel 2 bands
+        self.sar_indices = self._get_indices(['VV', 'VH'], sar_bands)
+        self.opt_indices = self._get_indices(['B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B11', 'B12'], opt_bands)
+
         self.split = split
-
-        self.num_views = num_views
-        self.specific_view = specific_view
+        if split == 'train':
+            self.sites = [
+                'albuquerque', 'atlantaeast', 'atlantawest', 'charlston', 'columbus', 'dallas', 'denver', 'elpaso',
+                'houston', 'kansascity', 'lasvegas', 'losangeles', 'miami', 'minneapolis', 'montreal', 'phoenix',
+                'quebec', 'saltlakecity', 'sandiego', 'santafe', 'seattle', 'stgeorge', 'toronto', 'tucson',
+                'winnipeg', 'sydney'
+            ]
+        elif split == 'val':
+            self.sites = ['calgary', 'newyork', 'sanfrancisco', 'vancouver']
+        else:
+            self.sites = ['spacenet7']
 
         self.transform = transform
+
+        self.samples = []
+        for site in self.sites:
+            samples_file = self.root_dir / site / 'samples.json'
+            with open(str(samples_file)) as f:
+                metadata = json.load(f)
+            samples = metadata['samples']
+            self.samples += samples
+
+    def __getitem__(self, index):
+
+        sample = self.samples[index]
+        patch_id = sample['patch_id']
+        site = sample['site']
+
+        img_sar = self._get_sentinel1_data(site, patch_id)
+        img_optical = self._get_sentinel2_data(site, patch_id)
+        label = self._get_label_data(site, patch_id)
+
+        x_sar, x_opt, label = self.transform((img_sar, img_optical, label))
+
+        return index, (x_sar, x_opt), label
+
+    def _get_sentinel1_data(self, site, patch_id):
+        file = self.root_dir / site / 'sentinel1' / f'sentinel1_{site}_{patch_id}.tif'
+        img = tifffile.imread(file)
+        img = img[:, :, self.sar_indices]
+        return np.nan_to_num(img).astype(np.float32)
+
+    def _get_sentinel2_data(self, site, patch_id):
+        file = self.root_dir / site / 'sentinel2' / f'sentinel2_{site}_{patch_id}.tif'
+        img = tifffile.imread(file)
+        img = img[:, :, self.opt_indices]
+        return np.nan_to_num(img).astype(np.float32)
+
+    def _get_label_data(self, site, patch_id):
+        label_file = self.root_dir / site / 'buildings' / f'buildings_{site}_{patch_id}.tif'
+        img = tifffile.imread(label_file)
+        img = img > 0
+        return np.nan_to_num(img).astype(np.float32)
+
+    @staticmethod
+    def _get_indices(bands, selection):
+        return [bands.index(band) for band in selection]
 
     def __len__(self):
         return len(self.samples)
 
-    def __getitem__(self, idx):
-        sample = self.samples[idx]
-        classname = sample['classname']
-        model = sample['model']
-        class_id = self.classnames.index(classname)
-        imgs = torch.load(self.root_dir / self.split / f'{model}.npy')
-        trans_imgs = []
-        for img, view in zip(imgs[self.specific_view], self.specific_view):
-            if self.transform:
-                img = self.transform(img)
-            trans_imgs.append(img)
-        data = torch.stack(trans_imgs)
-        return idx, data, class_id
+    def __str__(self):
+        return f'Dataset with {self.length} samples across {len(self.sites)} sites.'
+
+
+# dataset for urban extraction with building footprints
+class SpaceNet7Dataset(torch.utils.data.Dataset):
+    def __init__(self, root_dir: str, sar_bands: list, opt_bands: list, transform=None):
+
+        self.root_dir = Path(root_dir) / 'spacenet7'
+
+        # getting patches
+        samples_file = self.root_path / 'samples.json'
+        metadata = geofiles.load_json(samples_file)
+        self.samples = metadata['samples']
+        self.length = len(self.samples)
+
+        # getting regional information
+        regions_file = self.root_path / 'spacenet7_regions.json'
+        self.regions = geofiles.load_json(regions_file)
+
+
+        # creating boolean feature vector to subset sentinel 1 and sentinel 2 bands
+        self.sar_indices = self._get_indices(['VV', 'VH'], sar_bands)
+        self.opt_indices = self._get_indices(['B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B11', 'B12'], opt_bands)
+
+        self.transform = transform
+
+    def __getitem__(self, index):
+        # loading metadata of sample
+        sample = self.samples[index]
+        aoi_id = sample['aoi_id']
+
+        # loading images
+        img_sar, *_ = self._get_sentinel1_data(aoi_id)
+        img_optical, *_ = self._get_sentinel2_data(aoi_id)
+        label, geotransform, crs = self._get_label_data(aoi_id)
+        x_sar, x_optical, label = self.transform((img_sar, img_optical, label))
+
+        item = {
+            'x_sar': x_sar,
+            'x_optical': x_optical,
+            'y': label,
+            'aoi_id': aoi_id,
+            'country': sample['country'],
+            'region': self.get_region_name(aoi_id),
+            'transform': geotransform,
+            'crs': crs
+        }
+
+        return item
+
+    def _get_sentinel1_data(self, aoi_id):
+        file = self.root_path / 'sentinel1' / f'sentinel1_{aoi_id}.tif'
+        img, transform, crs = tifffile.imread(file)
+        img = img[:, :, self.s1_indices]
+        return np.nan_to_num(img).astype(np.float32)
+
+    def _get_sentinel2_data(self, aoi_id):
+        file = self.root_path / 'sentinel2' / f'sentinel2_{aoi_id}.tif'
+        img, transform, crs = tifffile.imread(file)
+        img = img[:, :, self.s2_indices]
+        return np.nan_to_num(img).astype(np.float32), transform, crs
+
+    def _get_label_data(self, aoi_id):
+        label = self.cfg.DATALOADER.LABEL
+        label_file = self.root_path / label / f'{label}_{aoi_id}.tif'
+        img, transform, crs = geofiles.read_tif(label_file)
+        img = img > 0
+        return np.nan_to_num(img).astype(np.float32), transform, crs
+
+    def get_index(self, aoi_id: str):
+        for i, sample in enumerate(self.samples):
+            if sample['aoi_id'] == aoi_id:
+                return i
+
+    def _get_region_index(self, aoi_id: str) -> int:
+        return self.regions['data'][aoi_id]
+
+    def get_region_name(self, aoi_id: str) -> str:
+        index = self._get_region_index(aoi_id)
+        return self.regions['regions'][str(index)]
+
+    @staticmethod
+    def _get_indices(bands, selection):
+        return [bands.index(band) for band in selection]
