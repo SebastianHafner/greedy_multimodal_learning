@@ -84,7 +84,7 @@ def _load_pretrained_model(model, save_path):
 
 
 @gin.configurable
-def training_loop(model, loss_function, metrics, optimizer, config, 
+def training_loop(model, loss_function, metrics, optimizer, config,
                   save_path,  steps_per_epoch, 
                   train=None, valid=None, test=None,
                   test_steps=None, validation_steps=None,
@@ -138,7 +138,7 @@ def training_loop(model, loss_function, metrics, optimizer, config,
                             test_steps=test_steps,
                             validation_steps=validation_steps,
                             steps_per_epoch=steps_per_epoch,
-                            epochs=n_epochs - 1, 
+                            epochs=n_epochs - 1,
                             callbacks=callbacks,
                             )
 

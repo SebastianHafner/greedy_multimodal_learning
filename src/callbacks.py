@@ -18,12 +18,14 @@ import copy
 import random
 import itertools
 import torch
+import wandb
 
 from gin.config import _OPERATIVE_CONFIG
 
 from src.utils import save_weights
 
 logger = logging.getLogger(__name__)        
+
 
 class CallbackList:
     def __init__(self, callbacks=None):
@@ -90,6 +92,7 @@ class CallbackList:
 
     def __iter__(self):
         return iter(self.callbacks)
+
 
 class Callback(object):
     def __init__(self):
@@ -171,21 +174,21 @@ class Callback(object):
 
 
 @gin.configurable
-class Bias_Mitigation_Strong(Callback):
+class BiasMitigationStrong(Callback):
     def __init__(self, 
                  epsilon,
                  curation_windowsize,
                  branchnames,
                  starting_epoch=2,
-                 MMTMnames = ['visual', 'skeleton']
+                 MMTMnames = ['sar', 'opt']
                  ):
         self.epsilon = epsilon
         self.branchnames = branchnames
         self.MMTMnames = MMTMnames
-        self.curation_windowsize=curation_windowsize
-        self.starting_epoch=starting_epoch
+        self.curation_windowsize = curation_windowsize
+        self.starting_epoch = starting_epoch
 
-        super(Bias_Mitigation_Strong, self).__init__()
+        super(BiasMitigationStrong, self).__init__()
     
     def on_train_begin(self, logs):
         self.M_bypass_modal_0 = 0
@@ -267,7 +270,7 @@ class Bias_Mitigation_Strong(Callback):
             self.unlock = True
 
 @gin.configurable
-class Bias_Mitigation_Random(Callback):
+class BiasMitigationRandom(Callback):
 
     def on_train_begin(self, logs):
         self.model_pytoune.curation_mode = False 
@@ -304,7 +307,7 @@ class Bias_Mitigation_Random(Callback):
 
 @gin.configurable
 class CompletedStopping(Callback):
-    def __init__(self, *, monitor='acc', patience=5, verbose=True):
+    def __init__(self, *, monitor='f1', patience=2, verbose=True):
         super(CompletedStopping, self).__init__()
         self.monitor = monitor
         self.patience = patience
@@ -318,9 +321,9 @@ class CompletedStopping(Callback):
     def on_epoch_end(self, epoch, logs):
         current = logs[self.monitor]
         if current == 100:
-            self.counter +=1
+            self.counter += 1
             
-        if self.counter>=self.patience:
+        if self.counter >= self.patience:
             
             self.stopped_epoch = epoch
             self.model_pytoune.stop_training = True
@@ -331,7 +334,7 @@ class CompletedStopping(Callback):
  
 
 @gin.configurable
-class ReduceLROnPlateau_PyTorch(Callback):
+class ReduceLROnPlateauPyTorch(Callback):
     def __init__(self, metric, factor=0.3, patience=10):
         self.metric = metric 
         self.factor = factor
@@ -346,41 +349,6 @@ class ReduceLROnPlateau_PyTorch(Callback):
 
     def on_epoch_end(self, epoch, logs):
         self.scheduler.step(logs[self.metric])
-
-
-class LambdaCallback(Callback):
-    def __init__(self,
-                 on_epoch_begin=None,
-                 on_epoch_end=None,
-                 on_batch_begin=None,
-                 on_batch_end=None,
-                 on_train_begin=None,
-                 on_train_end=None):
-        super(LambdaCallback, self).__init__()
-        if on_epoch_begin is not None:
-            self.on_epoch_begin = on_epoch_begin
-        else:
-            self.on_epoch_begin = lambda epoch, logs: None
-        if on_epoch_end is not None:
-            self.on_epoch_end = on_epoch_end
-        else:
-            self.on_epoch_end = lambda epoch, logs: None
-        if on_batch_begin is not None:
-            self.on_batch_begin = on_batch_begin
-        else:
-            self.on_batch_begin = lambda batch, logs: None
-        if on_batch_end is not None:
-            self.on_batch_end = on_batch_end
-        else:
-            self.on_batch_end = lambda batch, logs: None
-        if on_train_begin is not None:
-            self.on_train_begin = on_train_begin
-        else:
-            self.on_train_begin = lambda logs: None
-        if on_train_end is not None:
-            self.on_train_end = on_train_end
-        else:
-            self.on_train_end = lambda logs: None
 
 
 class ModelCheckpoint(Callback):
@@ -450,7 +418,76 @@ class ModelCheckpoint(Callback):
                 if self.verbose > 0:
                     print('Epoch %05d: saving model to %s' % (epoch, self.filepath))
                     save_weights(self.model, self.optimizer, self.filepath)
- 
+
+
+@gin.configurable
+class WBLoggingCallback(Callback):
+    def __init__(self, on: bool, run_name: str, project: str, log_frequency: int, other_metrics):
+
+        wandb.init(
+            name=run_name,
+            entity='spacenet7',
+            project=project,
+            tags=['run', 'urban', 'extraction', 'segmentation', ],
+            mode='online' if on else 'disabled',
+        )
+
+        self.log_frequency = log_frequency
+        self.loss_values = []
+
+        self.other_metrics = []
+        self.other_metric_values = []
+        for me in other_metrics:
+            self.other_metrics.append(me)
+            self.other_metric_values.append([])
+
+        self.epoch = 0
+
+    def on_train_begin(self, logs):
+        self.metrics = ['loss'] + self.model_pytoune.metrics_names
+        self.epochs = self.params['epochs']
+        self.steps = self.params['steps']
+
+    def on_epoch_begin(self, epoch, logs):
+        self.epoch = epoch
+
+    def on_epoch_end(self, epoch, logs):
+        pass
+
+    def on_batch_end(self, batch, logs):
+        if not batch % (self.log_frequency + 1) == 0:
+            self.loss_values.append(logs['loss'])
+            for i, metric in enumerate(self.other_metrics):
+                if metric in logs.keys():
+                    self.other_metric_values[i].append(logs[metric])
+        else:
+            log_dict = {
+                f'loss': np.mean(self.loss_values),
+                'step': (self.epoch - 1) * self.steps + batch,
+            }
+
+            for metric, values in zip(self.other_metrics, self.other_metric_values):
+                if metric == 'curation_mode':
+                    log_dict['regular_step_rate'] = np.sum(np.logical_not(values)) / self.log_frequency * 100
+                    log_dict['rebalancing_step_rate'] = np.sum(values) / self.log_frequency * 100
+                if metric == 'caring_modality':
+                    index = self.other_metrics.index('curation_mode')
+                    curation_mode = np.array(self.other_metric_values[index], dtype=bool)
+                    actual_rebalancing_steps = np.array(values)[curation_mode]
+                    log_dict['rebalancing_step_rate_sar'] = np.sum(np.logical_not(actual_rebalancing_steps)) /\
+                                                            self.log_frequency * 100
+                    log_dict['rebalancing_step_rate_opt'] = np.sum(actual_rebalancing_steps) / self.log_frequency * 100
+                else:
+                    if values:
+                        log_dict[metric] = np.mean(values)
+            wandb.log(log_dict)
+            self._reset_avg_list()
+
+    def _reset_avg_list(self):
+        self.loss_values = []
+        for i in range(len(self.other_metric_values)):
+            self.other_metric_values[i] = []
+
 
 @gin.configurable
 class ProgressionCallback(Callback):
@@ -490,7 +527,7 @@ class ProgressionCallback(Callback):
 
         metrics_str = self._get_metrics_string(logs)
         iol_str = self._get_iol_string(logs)
-        #print(iol_str)
+
         times_mean = self.step_times_sum / batch
         if self.steps is not None:
             remaining_time = times_mean * (self.steps - batch)
@@ -515,6 +552,10 @@ class ProgressionCallback(Callback):
         str_gen = ['{}: {:f}'.format(k, logs[k]) for k in self.other_metrics if logs.get(k) is not None]
         #print(str_gen, '\n',[(k, logs[k]) for k in ['average_iol_current_epoch', 'average_iol']])
         return  ', '.join(str_gen)
+
+    def on_log_to_wandb(self, batch, logs):
+        pass
+
 
 class ValidationProgressionCallback(Callback):
     def __init__(self, 
@@ -557,3 +598,36 @@ class ValidationProgressionCallback(Callback):
             self.last_step = batch
 
 
+class LambdaCallback(Callback):
+    def __init__(self,
+                 on_epoch_begin=None,
+                 on_epoch_end=None,
+                 on_batch_begin=None,
+                 on_batch_end=None,
+                 on_train_begin=None,
+                 on_train_end=None):
+        super(LambdaCallback, self).__init__()
+        if on_epoch_begin is not None:
+            self.on_epoch_begin = on_epoch_begin
+        else:
+            self.on_epoch_begin = lambda epoch, logs: None
+        if on_epoch_end is not None:
+            self.on_epoch_end = on_epoch_end
+        else:
+            self.on_epoch_end = lambda epoch, logs: None
+        if on_batch_begin is not None:
+            self.on_batch_begin = on_batch_begin
+        else:
+            self.on_batch_begin = lambda batch, logs: None
+        if on_batch_end is not None:
+            self.on_batch_end = on_batch_end
+        else:
+            self.on_batch_end = lambda batch, logs: None
+        if on_train_begin is not None:
+            self.on_train_begin = on_train_begin
+        else:
+            self.on_train_begin = lambda logs: None
+        if on_train_end is not None:
+            self.on_train_end = on_train_end
+        else:
+            self.on_train_end = lambda logs: None

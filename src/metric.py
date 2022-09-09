@@ -29,7 +29,7 @@ def recall(y_true: torch.Tensor, y_pred: torch.Tensor):
     return true_pos(y_true, y_pred) / denom
 
 
-def f1_score(gts: torch.Tensor, preds: torch.Tensor):
+def f1(gts: torch.Tensor, preds: torch.Tensor):
     gts = gts.float().flatten()
     preds = preds.float().flatten()
 
@@ -38,9 +38,9 @@ def f1_score(gts: torch.Tensor, preds: torch.Tensor):
         precision_val = precision(gts, preds)
         denom = torch.clamp((recall_val + precision_val), 10e-5)
 
-        f1 = 2. * recall_val * precision_val / denom
+        f1_score = 2. * recall_val * precision_val / denom
 
-    return f1
+    return f1_score
 
 
 def iou(gts: torch.Tensor, preds: torch.Tensor):

@@ -6,12 +6,7 @@ from functools import partial
 import math
 import itertools
 
-from src.callbacks import (
-     ValidationProgressionCallback, 
-     ProgressionCallback,
-     CallbackList, 
-     Callback
-)
+from src.callbacks import ValidationProgressionCallback, ProgressionCallback, WBLoggingCallback, CallbackList, Callback
 from src.utils import numpy_to_torch, torch_to_numpy, torch_to
 
 import logging
@@ -97,7 +92,7 @@ class StepIterator:
             metrics_dict = dict(zip(self.metrics_names, step_data['metrics']))
 
             for i in range(self.nummodalities):
-                names = [f'{x}_modal_{i}' for x in self.metrics_names]
+                names = [f'{x}_{"sar" if i == 0 else "opt"}' for x in self.metrics_names]
                 metrics_dict.update(dict(zip(names, step_data['modalitywise_metrics'][i])))
 
             for key, value in step_data.items():
@@ -128,8 +123,86 @@ class Model_:
         self.verbose = verbose
         self.verbose_logs = {} 
         self.nummodalities = nummodalities
-        self.curation_mode=False
-        self.caring_modality=None
+        self.curation_mode = False
+        self.caring_modality = None
+
+    def train_loop(self,
+                   train_generator,
+                   test_generator=None,
+                   valid_generator=None,
+                   *,
+                   epochs=1000,
+                   steps_per_epoch=None,
+                   validation_steps=None,
+                   test_steps=None,
+                   callbacks=[],
+                   ):
+
+        self._transfer_optimizer_state_to_right_device()
+
+        callback_list = CallbackList(callbacks)
+        callback_list.append(ProgressionCallback())
+        callback_list.append(WBLoggingCallback())
+        callback_list.set_model_pytoune(self)
+        callback_list.set_params({'epochs': epochs, 'steps': steps_per_epoch})
+
+        self.stop_training = False
+
+        callback_list.on_train_begin({})
+        val_dict, test_dict = {}, {}
+        for epoch in range(1, epochs + 1):
+            callback_list.on_epoch_begin(epoch, {})
+            epoch_begin_time = timeit.default_timer()
+
+            # training
+            train_step_iterator = StepIterator(train_generator,
+                                               steps_per_epoch,
+                                               callback_list,
+                                               self.metrics_names,
+                                               self.nummodalities
+                                               )
+            self.model.train(True)
+            with torch.enable_grad():
+                for step, (x, y) in train_step_iterator:
+                    step['size'] = self._get_batch_size(x, y)
+
+                    self.optimizer.zero_grad()
+                    loss_tensor, info = self._compute_loss_and_metrics(x, y)
+
+                    loss_tensor.backward()
+                    callback_list.on_backward_end(step['number'])
+                    self.optimizer.step()
+
+                    loss = loss_tensor.item()
+                    step.update(info)
+                    step['loss'] = loss
+                    if math.isnan(step['loss']):
+                        self.stop_training = True
+
+            train_dict = {
+                'loss': train_step_iterator.loss,
+                'train_indices': train_step_iterator.indices,
+                **{f'train_{k}': v for k, v in train_step_iterator.extra_lists.items()},
+                **train_step_iterator.metrics
+            }
+
+            # validation
+            val_dict = self._eval_generator(valid_generator, 'val', steps=validation_steps)
+            # test
+            test_dict = self._eval_generator(test_generator, 'test', steps=test_steps)
+
+            epoch_log = {
+                'epoch': epoch,
+                'time': timeit.default_timer() - epoch_begin_time,
+                'epoch_begin_time': epoch_begin_time,
+                **train_dict, **val_dict, **test_dict
+            }
+
+            callback_list.on_epoch_end(epoch, epoch_log)
+
+            if self.stop_training: break
+
+        callback_list.on_train_end({})
 
     def _compute_loss_and_metrics(self, x, y):
         x, y = self._process_input(x, y)
@@ -248,7 +321,7 @@ class Model_:
         callback_list.set_model_pytoune(self)
         callback_list.on_train_begin({})
         epoch = 0
-        while epoch <=epochs:
+        while epoch <= epochs:
             epoch_begin_time = timeit.default_timer()
             callback_list.on_epoch_begin(epoch, {})
             test_dict = self._eval_generator(test_generator, 'test', steps=test_steps)
@@ -259,83 +332,6 @@ class Model_:
 
             callback_list.on_epoch_end(epoch, test_dict)
             
-            epoch+=1
+            epoch += 1
 
-    def train_loop(self,
-                      train_generator,
-                      test_generator=None,
-                      valid_generator=None,
-                      *,
-                      epochs=1000,
-                      steps_per_epoch=None,
-                      validation_steps=None,
-                      test_steps=None,
-                      callbacks=[],
-                      ):
-        
-        self._transfer_optimizer_state_to_right_device()
 
-        callback_list = CallbackList(callbacks)
-        callback_list.append(ProgressionCallback())
-        callback_list.set_model_pytoune(self)
-        callback_list.set_params({'epochs': epochs, 'steps': steps_per_epoch})
-
-        self.stop_training = False
-
-        callback_list.on_train_begin({})
-        val_dict, test_dict = {}, {}
-        for epoch in range(1, epochs+1):
-            callback_list.on_epoch_begin(epoch, {})
-            
-            epoch_begin_time = timeit.default_timer()
-
-            # training
-            train_step_iterator = StepIterator(train_generator,
-                                               steps_per_epoch,
-                                               callback_list,
-                                               self.metrics_names,
-                                               self.nummodalities
-                                               )
-            self.model.train(True)
-            with torch.enable_grad():
-                for step, (x, y) in train_step_iterator: 
-                    step['size'] = self._get_batch_size(x, y)
-
-                    self.optimizer.zero_grad()
-                    loss_tensor, info = self._compute_loss_and_metrics(x, y)
-
-                    loss_tensor.backward()
-                    callback_list.on_backward_end(step['number'])
-                    self.optimizer.step()  
-
-                    loss = loss_tensor.item()
-                    step.update(info)
-                    step['loss'] = loss
-                    
-                    if math.isnan(step['loss']): 
-                        self.stop_training = True
-
-            train_dict = {
-                'loss': train_step_iterator.loss,
-                'train_indices': train_step_iterator.indices,
-                **{f'train_{k}': v for k, v in train_step_iterator.extra_lists.items()},
-                **train_step_iterator.metrics
-            }
-            
-            # validation
-            val_dict = self._eval_generator(valid_generator, 'val', steps=validation_steps)
-            # test
-            test_dict = self._eval_generator(test_generator, 'test', steps=test_steps)
-           
-            epoch_log = {
-                'epoch': epoch, 
-                'time': timeit.default_timer() - epoch_begin_time, 
-                'epoch_begin_time': epoch_begin_time,
-                **train_dict, **val_dict, **test_dict
-            }
-             
-            callback_list.on_epoch_end(epoch, epoch_log)
-
-            if self.stop_training: break
-
-        callback_list.on_train_end({})

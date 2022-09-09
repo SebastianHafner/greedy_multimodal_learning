@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Trainer script. Example run command: train.py save_to_folder configs/cnn.gin.
-"""
+
 import os
 os.environ['DATA_DIR'] = 'C:/Users/shafner/datasets/urban_dataset'
 import gin
@@ -17,7 +15,7 @@ from src.model import MMTM_DSUNet
 from src.training_loop import training_loop
 from src.utils import gin_wrap
 from src.loss_function import power_jaccard_loss
-from src.metric import f1_score
+from src.metric import f1
 
 
 def blend_loss(y_hat, y):
@@ -31,6 +29,7 @@ def blend_loss(y_hat, y):
 
 @gin.configurable
 def train(save_path, wd, lr, momentum, batch_size, callbacks=[]):
+
     model = MMTM_DSUNet()
     train, valid, test = dataset.get_urbanmappingdata(batch_size=batch_size)
 
@@ -48,7 +47,7 @@ def train(save_path, wd, lr, momentum, batch_size, callbacks=[]):
     training_loop(model=model, 
         optimizer=optimizer, 
         loss_function=blend_loss, 
-        metrics=[f1_score],
+        metrics=[f1],
         train=train, valid=valid, test=test, 
         steps_per_epoch=len(train),
         validation_steps=len(valid),

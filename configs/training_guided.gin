@@ -1,6 +1,8 @@
 # Model
 
 # Train configuration
+train.name='training_guided'
+train.logging=False
 train.batch_size=2
 train.lr=0.1
 train.wd=0.0
@@ -31,5 +33,11 @@ training_loop.checkpoint_monitor='val_acc'
 # Dataset
 get_urbanmappingdata.num_workers=0
 get_urbanmappingdata.seed=7
+get_urbanmappingdata.train_sites=['albuquerque', 'atlantaeast', 'atlantawest', 'charlston', 'columbus', 'dallas',
+    'denver', 'elpaso', 'houston', 'kansascity', 'lasvegas', 'losangeles', 'miami', 'minneapolis', 'montreal',
+    'phoenix', 'quebec', 'saltlakecity', 'sandiego', 'santafe', 'seattle', 'stgeorge', 'toronto', 'tucson',
+    'winnipeg', 'sydney']
+get_urbanmappingdata.val_sites=['calgary', 'newyork', 'sanfrancisco', 'vancouver']
+get_urbanmappingdata.test_sites=['spacenet7']
 get_urbanmappingdata.sar_bands=['VV', 'VH']
 get_urbanmappingdata.opt_bands=['B2', 'B3', 'B4', 'B8']

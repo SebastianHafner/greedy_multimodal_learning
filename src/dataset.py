@@ -16,7 +16,10 @@ SEED_FIXED = 100000
 
 @gin.configurable 
 def get_urbanmappingdata(
-        root_dir=os.environ['DATA_DIR'],
+        root_dir,
+        train_sites=[],
+        val_sites=[],
+        test_sites=[],
         sar_bands=['VV', 'VH'],
         opt_bands=['B2', 'B3', 'B4', 'B8'],
         batch_size=8,
@@ -41,15 +44,15 @@ def get_urbanmappingdata(
             aug.Numpy2Torch(),
         ])
 
-    train_dataset = UrbanExtractionDataset(root_dir, 'train', sar_bands, opt_bands, train_transform)
+    train_dataset = UrbanExtractionDataset(root_dir, 'train', train_sites, sar_bands, opt_bands, train_transform)
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
                                                   num_workers=num_workers)
 
-    val_dataset = UrbanExtractionDataset(root_dir, 'val', sar_bands, opt_bands, evaluation_transform)
+    val_dataset = UrbanExtractionDataset(root_dir, 'val', val_sites, sar_bands, opt_bands, evaluation_transform)
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
-    test_dataset = UrbanExtractionDataset(root_dir, 'test', sar_bands, opt_bands, evaluation_transform)
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
+    test_dataset = UrbanExtractionDataset(root_dir, 'test', test_sites, sar_bands, opt_bands, evaluation_transform)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False,
                                               num_workers=num_workers)
 
     return train_loader, val_loader, test_loader
@@ -57,7 +60,7 @@ def get_urbanmappingdata(
 
 # dataset for urban extraction with building footprints
 class UrbanExtractionDataset(torch.utils.data.Dataset):
-    def __init__(self, root_dir: str, split: str, sar_bands: list, opt_bands: list, transform=None):
+    def __init__(self, root_dir: str, split: str, sites: list, sar_bands: list, opt_bands: list, transform=None):
 
         self.root_dir = Path(root_dir)
 
@@ -66,18 +69,7 @@ class UrbanExtractionDataset(torch.utils.data.Dataset):
         self.opt_indices = self._get_indices(['B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B11', 'B12'], opt_bands)
 
         self.split = split
-        if split == 'train':
-            self.sites = [
-                'albuquerque', 'atlantaeast', 'atlantawest', 'charlston', 'columbus', 'dallas', 'denver', 'elpaso',
-                'houston', 'kansascity', 'lasvegas', 'losangeles', 'miami', 'minneapolis', 'montreal', 'phoenix',
-                'quebec', 'saltlakecity', 'sandiego', 'santafe', 'seattle', 'stgeorge', 'toronto', 'tucson',
-                'winnipeg', 'sydney'
-            ]
-        elif split == 'val':
-            self.sites = ['calgary', 'newyork', 'sanfrancisco', 'vancouver']
-        else:
-            self.sites = ['spacenet7']
-
+        self.sites = sites
         self.transform = transform
 
         self.samples = []
@@ -91,8 +83,8 @@ class UrbanExtractionDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
 
         sample = self.samples[index]
-        patch_id = sample['patch_id']
-        site = sample['site']
+        site = 'spacenet7' if self.split == 'test' else sample['site']
+        patch_id = sample['aoi_id'] if self.split == 'test' else sample['patch_id']
 
         img_sar = self._get_sentinel1_data(site, patch_id)
         img_optical = self._get_sentinel2_data(site, patch_id)
@@ -103,19 +95,28 @@ class UrbanExtractionDataset(torch.utils.data.Dataset):
         return index, (x_sar, x_opt), label
 
     def _get_sentinel1_data(self, site, patch_id):
-        file = self.root_dir / site / 'sentinel1' / f'sentinel1_{site}_{patch_id}.tif'
+        if self.split == 'test':
+            file = self.root_dir / site / 'sentinel1' / f'sentinel1_{patch_id}.tif'
+        else:
+            file = self.root_dir / site / 'sentinel1' / f'sentinel1_{site}_{patch_id}.tif'
         img = tifffile.imread(file)
         img = img[:, :, self.sar_indices]
         return np.nan_to_num(img).astype(np.float32)
 
     def _get_sentinel2_data(self, site, patch_id):
-        file = self.root_dir / site / 'sentinel2' / f'sentinel2_{site}_{patch_id}.tif'
+        if self.split == 'test':
+            file = self.root_dir / site / 'sentinel2' / f'sentinel2_{patch_id}.tif'
+        else:
+            file = self.root_dir / site / 'sentinel2' / f'sentinel2_{site}_{patch_id}.tif'
         img = tifffile.imread(file)
         img = img[:, :, self.opt_indices]
         return np.nan_to_num(img).astype(np.float32)
 
     def _get_label_data(self, site, patch_id):
-        label_file = self.root_dir / site / 'buildings' / f'buildings_{site}_{patch_id}.tif'
+        if self.split == 'test':
+            label_file = self.root_dir / site / 'buildings' / f'buildings_{patch_id}.tif'
+        else:
+            label_file = self.root_dir / site / 'buildings' / f'buildings_{site}_{patch_id}.tif'
         img = tifffile.imread(label_file)
         img = img > 0
         return np.nan_to_num(img).astype(np.float32)

@@ -122,10 +122,14 @@ class MMTM_DSUNet(nn.Module):
         squeezed_mps.append(squeezed_mp)
 
         features_sar = self.up1_sar(features_sar)
+        diffY = skip2_sar.detach().size()[2] - features_sar.detach().size()[2]
+        diffX = skip2_sar.detach().size()[3] - features_sar.detach().size()[3]
+        features_sar = F.pad(features_sar, (diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2))
         features_sar = torch.cat([skip2_sar, features_sar], dim=1)
         features_sar = self.conv3_sar(features_sar)
 
         features_opt = self.up1_opt(features_opt)
+        features_opt = F.pad(features_opt, (diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2))
         features_opt = torch.cat([skip2_opt, features_opt], dim=1)
         features_opt = self.conv3_opt(features_opt)
 
@@ -135,10 +139,14 @@ class MMTM_DSUNet(nn.Module):
         squeezed_mps.append(squeezed_mp)
 
         features_sar = self.up2_sar(features_sar)
+        diffY = skip1_sar.detach().size()[2] - features_sar.detach().size()[2]
+        diffX = skip1_sar.detach().size()[3] - features_sar.detach().size()[3]
+        features_sar = F.pad(features_sar, (diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2))
         features_sar = torch.cat([skip1_sar, features_sar], dim=1)
         features_sar = self.conv4_sar(features_sar)
 
         features_opt = self.up2_opt(features_opt)
+        features_opt = F.pad(features_opt, (diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2))
         features_opt = torch.cat([skip1_opt, features_opt], dim=1)
         features_opt = self.conv4_opt(features_opt)
 
