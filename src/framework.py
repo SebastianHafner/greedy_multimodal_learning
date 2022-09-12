@@ -47,26 +47,26 @@ class StepIterator:
 
     @property
     def loss(self):
-        if self.sizes_sum==0:
+        if self.sizes_sum == 0:
             return 0
         else:
             return self.losses_sum / self.sizes_sum
 
     @property
     def metrics(self):
-        if self.sizes_sum==0:
+        if self.sizes_sum == 0:
             return dict(zip(self.metrics_names, np.zeros(len(self.metrics_names))))
         else:
             metrics_dict = dict(zip(self.metrics_names, self.metrics_sum / self.sizes_sum))
             for i in range(self.nummodalities):
-                names = [f'{x}_modal_{i}' for x in self.metrics_names]
+                names = [f'{x}_{"sar" if i == 0 else "opt"}' for x in self.metrics_names]
                 metrics_dict.update(dict(zip(names, self.metrics_permodal_sum[i]/self.sizes_sum)))
 
             return metrics_dict
 
     @property
     def indices(self):
-        if self.sizes_sum==0:
+        if self.sizes_sum == 0:
             return []
         elif self.indices_list[0] is None:
             return []
@@ -77,10 +77,11 @@ class StepIterator:
         for batch_ind, data in _get_step_iterator(self.steps_per_epoch, self.generator):
             batch_begin_time = timeit.default_timer()
             self.callback.on_batch_begin(batch_ind, {})
-            self.callback.on_forward_begin(batch_ind, data) 
-
-            step_data = {'number': batch_ind}
-            step_data['indices'] = data[0]
+            self.callback.on_forward_begin(batch_ind, data)
+            step_data = {
+                'number': batch_ind,
+                'indices': data[0]
+            }
             yield step_data, data[1:]
 
             self.losses_sum += step_data['loss'] * step_data['size']
@@ -139,10 +140,9 @@ class Model_:
                    ):
 
         self._transfer_optimizer_state_to_right_device()
-
         callback_list = CallbackList(callbacks)
         callback_list.append(ProgressionCallback())
-        callback_list.append(WBLoggingCallback())
+        callback_list.append(WBLoggingCallback(metrics=self.metrics_names))
         callback_list.set_model_pytoune(self)
         callback_list.set_params({'epochs': epochs, 'steps': steps_per_epoch})
 
@@ -178,6 +178,9 @@ class Model_:
                     step['loss'] = loss
                     if math.isnan(step['loss']):
                         self.stop_training = True
+
+                    # if step['number'] % 11 == 0:
+                    #     break
 
             train_dict = {
                 'loss': train_step_iterator.loss,
@@ -246,14 +249,6 @@ class Model_:
             return len(x)
         if torch.is_tensor(y) or isinstance(y, np.ndarray):
             return len(y)
-        if warning_settings['batch_size'] == 'warn':
-            warnings.warn("When 'x' or 'y' are not tensors nor Numpy arrays, "
-                          "the batch size is set to 1 and, thus, the computed "
-                          "loss and metrics at the end of each epoch is the "
-                          "mean of the batches' losses and metrics. To disable "
-                          "this warning, set\n"
-                          "from poutyne.framework import warning_settings\n"
-                          "warning_settings['batch_size'] = 'ignore'")
         return 1
 
     def _transfer_optimizer_state_to_right_device(self):
@@ -303,14 +298,17 @@ class Model_:
                 loss_tensor, info = self._compute_loss_and_metrics(x, y)
                 step['loss'] = float(loss_tensor)
                 step.update(info)
+                # if step['number'] == 11:
+                #     break
 
         metrics_dict = {
-            f'{phase}_{metric_name}' : metric for metric_name, metric in step_iterator.metrics.items()
+            f'{phase}_{metric_name}': metric for metric_name, metric in step_iterator.metrics.items()
         }
 
-        info_dict = {f'{phase}_loss' : step_iterator.loss, 
+        info_dict = {
+            f'{phase}_loss' : step_iterator.loss,
             f'{phase}_indices': step_iterator.indices,
-            **{f'{phase}_{k}':v for k, v in step_iterator.extra_lists.items()},
+            **{f'{phase}_{k}': v for k, v in step_iterator.extra_lists.items()},
             **metrics_dict
         }
 

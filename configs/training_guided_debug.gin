@@ -1,11 +1,11 @@
 # Model
 
 # Train configuration
-train.batch_size=2
+train.batch_size=4
 train.lr=0.1
 train.wd=0.0
 train.momentum=0
-train.callbacks=['CompletedStopping', 'ReduceLROnPlateauPyTorch', 'BiasMitigationStrong']
+train.callbacks=['BiasMitigationStrong']
 
 ReduceLROnPlateauPyTorch.metric='loss'
 
@@ -28,10 +28,10 @@ WBLoggingCallback.other_metrics=['f1_sar', 'f1_opt', 'val_f1_sar', 'val_f1_opt',
 
 # Training loop
 training_loop.nummodalities=2
-training_loop.n_epochs=300
+training_loop.n_epochs=10
 training_loop.use_gpu=True
 training_loop.device_numbers=[0]
-training_loop.checkpoint_monitor='val_acc'
+training_loop.checkpoint_monitor='val_f1'
 
 # Dataset
 get_urbanmappingdata.root_dir = 'C:/Users/shafner/datasets/urban_dataset'

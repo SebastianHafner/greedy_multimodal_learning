@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import os
-os.environ['DATA_DIR'] = 'C:/Users/shafner/datasets/urban_dataset'
 import gin
 from gin.config import _CONFIG
 import torch
 import logging
-logger = logging.getLogger(__name__)
 
 from src import dataset
 from src import callbacks as avail_callbacks 
@@ -16,6 +13,8 @@ from src.training_loop import training_loop
 from src.utils import gin_wrap
 from src.loss_function import power_jaccard_loss
 from src.metric import f1
+
+logger = logging.getLogger(__name__)
 
 
 def blend_loss(y_hat, y):
@@ -33,10 +32,12 @@ def train(save_path, wd, lr, momentum, batch_size, callbacks=[]):
     model = MMTM_DSUNet()
     train, valid, test = dataset.get_urbanmappingdata(batch_size=batch_size)
 
-    optimizer = torch.optim.SGD(model.parameters(), 
+    optimizer = torch.optim.SGD(
+        model.parameters(),
         lr=lr, 
         weight_decay=wd, 
-        momentum=momentum)
+        momentum=momentum
+    )
 
     callbacks_constructed = []
     for name in callbacks:
@@ -44,7 +45,8 @@ def train(save_path, wd, lr, momentum, batch_size, callbacks=[]):
             clbk = avail_callbacks.__dict__[name]()
             callbacks_constructed.append(clbk)
 
-    training_loop(model=model, 
+    training_loop(
+        model=model,
         optimizer=optimizer, 
         loss_function=blend_loss, 
         metrics=[f1],

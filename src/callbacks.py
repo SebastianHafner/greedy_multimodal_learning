@@ -352,9 +352,7 @@ class ReduceLROnPlateauPyTorch(Callback):
 
 
 class ModelCheckpoint(Callback):
-    def __init__(self, filepath, monitor='val_loss', verbose=0,
-                 save_best_only=False,
-                 mode='auto', period=1):
+    def __init__(self, filepath, monitor='val_loss', verbose=0, save_best_only=False, mode='auto', period=1):
         super(ModelCheckpoint, self).__init__()
         self.monitor = monitor
         self.verbose = verbose
@@ -373,7 +371,8 @@ class ModelCheckpoint(Callback):
             self.monitor_op = np.greater
             self.best = -np.Inf
         else:
-            if 'acc' in self.monitor or self.monitor.startswith('fmeasure'):
+            # TODO: check this one
+            if 'f1' in self.monitor or self.monitor.startswith('f1'):
                 self.monitor_op = np.greater
                 self.best = -np.Inf
             else:
@@ -422,7 +421,7 @@ class ModelCheckpoint(Callback):
 
 @gin.configurable
 class WBLoggingCallback(Callback):
-    def __init__(self, on: bool, run_name: str, project: str, log_frequency: int, other_metrics):
+    def __init__(self, on: bool, run_name: str, project: str, log_frequency: int, metrics, other_metrics):
 
         wandb.init(
             name=run_name,
@@ -437,7 +436,8 @@ class WBLoggingCallback(Callback):
 
         self.other_metrics = []
         self.other_metric_values = []
-        for me in other_metrics:
+        metrics = [f'{split}{metric}' for metric in metrics for split in ['', 'val_', 'test_']]
+        for me in metrics + other_metrics:
             self.other_metrics.append(me)
             self.other_metric_values.append([])
 
@@ -491,8 +491,7 @@ class WBLoggingCallback(Callback):
 
 @gin.configurable
 class ProgressionCallback(Callback):
-    def __init__(self,
-        other_metrics = ['average_iol_current_epoch', 'average_iol']):
+    def __init__(self, other_metrics: list):
          
         self.other_metrics = []
         for me in other_metrics:
@@ -506,7 +505,7 @@ class ProgressionCallback(Callback):
     def on_epoch_begin(self, epoch, logs):
         self.step_times_sum = 0.
         self.epoch = epoch
-        sys.stdout.write("\rEpoch %d/%d" % (self.epoch, self.epochs))
+        sys.stdout.write(f'Epoch {self.epoch}/{self.epochs}')
         sys.stdout.flush()
 
     def on_epoch_end(self, epoch, logs):
@@ -515,26 +514,30 @@ class ProgressionCallback(Callback):
         metrics_str = self._get_metrics_string(logs)
         iol_str = self._get_iol_string(logs)
         if self.steps is not None:
+
+            epoch_time = timeit.default_timer() - logs['epoch_begin_time']
+            # print(f'Epoch {self.epoch}/{self.epochs} {epoch_total_time:.2fs}/{epoch_time:.2fs}: Step {self.steps}/{self.steps}: {metrics_str}. {iol_str}')
+
             print("\rEpoch %d/%d %.2fs/%.2fs: Step %d/%d: %s. %s" %
-                  (self.epoch, self.epochs, epoch_total_time, timeit.default_timer()-logs['epoch_begin_time'], self.steps, self.steps, metrics_str, iol_str))
+                  (self.epoch, self.epochs, epoch_total_time, epoch_time, self.steps, self.steps, metrics_str, iol_str))
 
         else:
             print("\rEpoch %d/%d %.2fs/%.2fs: Step %d/%d: %s. %s" %
                   (self.epoch, self.epochs, epoch_total_time, timeit.default_timer()-logs['epoch_begin_time'], self.last_step, self.last_step, metrics_str, iol_str))
 
     def on_batch_end(self, batch, logs):
-        self.step_times_sum += timeit.default_timer()-logs['batch_begin_time']
+        self.step_times_sum += timeit.default_timer() - logs['batch_begin_time']
 
         metrics_str = self._get_metrics_string(logs)
         iol_str = self._get_iol_string(logs)
 
         times_mean = self.step_times_sum / batch
         if self.steps is not None:
-            remaining_time = times_mean * (self.steps - batch)
-            
-            sys.stdout.write("\rEpoch %d/%d ETA %.2fs Step %d/%d: %s. %s" %
-                             (self.epoch, self.epochs, remaining_time, batch, self.steps, metrics_str, iol_str))
-            if 'cumsum_iol' in iol_str: sys.stdout.write("\n")
+            eta = times_mean * (self.steps - batch)
+            _str = f'Epoch {self.epoch}/{self.epochs} ETA {eta:.2f} Step {batch}/{self.steps}: {metrics_str} {iol_str}'
+            sys.stdout.write("\r%s" % _str)
+            if 'cumsum_iol' in iol_str:
+                sys.stdout.write("\n")
             sys.stdout.flush()
         else:
             sys.stdout.write("\rEpoch %d/%d %.2fs/step Step %d: %s. %s" %
@@ -550,18 +553,11 @@ class ProgressionCallback(Callback):
 
     def _get_iol_string(self, logs):
         str_gen = ['{}: {:f}'.format(k, logs[k]) for k in self.other_metrics if logs.get(k) is not None]
-        #print(str_gen, '\n',[(k, logs[k]) for k in ['average_iol_current_epoch', 'average_iol']])
         return  ', '.join(str_gen)
-
-    def on_log_to_wandb(self, batch, logs):
-        pass
 
 
 class ValidationProgressionCallback(Callback):
-    def __init__(self, 
-                 phase,
-                 metrics_names,
-                 steps=None):
+    def __init__(self, phase, metrics_names, steps=None):
         self.params = {}
         self.params['steps'] = steps
         self.params['phase'] = phase 
@@ -575,7 +571,7 @@ class ValidationProgressionCallback(Callback):
         return ', '.join(metrics_str_gen)
 
     def on_batch_begin(self, batch, logs):
-        if batch==1:
+        if batch == 1:
             self.step_times_sum = 0.
         
         self.steps = self.params['steps']

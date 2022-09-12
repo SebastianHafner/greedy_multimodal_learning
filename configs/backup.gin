@@ -18,8 +18,8 @@ BiasMitigationStrong.MMTMnames = ['sar', 'opt']
 
 ProgressionCallback.other_metrics=['f1_sar', 'f1_opt', 'val_f1_sar', 'val_f1_opt', 'd_BDR', 'curation_mode', 'caring_modality']
 
-WBLoggingCallback.on=True
-WBLoggingCallback.log_frequency=100
+WBLoggingCallback.on=False
+WBLoggingCallback.log_frequency=10
 WBLoggingCallback.run_name='training_guided'
 WBLoggingCallback.project='balanced_learning_v2'
 WBLoggingCallback.other_metrics=['f1_sar', 'f1_opt', 'val_f1_sar', 'val_f1_opt', 'd_BDR', 'curation_mode', 'caring_modality']
@@ -35,8 +35,11 @@ training_loop.checkpoint_monitor='val_f1'
 get_urbanmappingdata.root_dir = 'C:/Users/shafner/datasets/urban_dataset'
 get_urbanmappingdata.num_workers=0
 get_urbanmappingdata.seed=7
-get_urbanmappingdata.train_sites=['quebec', 'dallas']
-get_urbanmappingdata.val_sites=['calgary']
+get_urbanmappingdata.train_sites=['albuquerque', 'atlantaeast', 'atlantawest', 'charlston', 'columbus', 'dallas',
+    'denver', 'elpaso', 'houston', 'kansascity', 'lasvegas', 'losangeles', 'miami', 'minneapolis', 'montreal',
+    'phoenix', 'quebec', 'saltlakecity', 'sandiego', 'santafe', 'seattle', 'stgeorge', 'toronto', 'tucson',
+    'winnipeg', 'sydney']
+get_urbanmappingdata.val_sites=['calgary', 'newyork', 'sanfrancisco', 'vancouver']
 get_urbanmappingdata.test_sites=['spacenet7']
 get_urbanmappingdata.sar_bands=['VV', 'VH']
 get_urbanmappingdata.opt_bands=['B2', 'B3', 'B4', 'B8']
