@@ -301,7 +301,7 @@ class BiasMitigationRandom(Callback):
             self.model_pytoune.caring_modality = 0 
 
     def on_epoch_begin(self, epoch, logs):
-        if epoch>=self.starting_epoch:
+        if epoch >= self.starting_epoch:
             self.unlock=True
 
 
@@ -352,7 +352,7 @@ class ReduceLROnPlateauPyTorch(Callback):
 
 
 class ModelCheckpoint(Callback):
-    def __init__(self, filepath, monitor='val_loss', verbose=0, save_best_only=False, mode='auto', period=1):
+    def __init__(self, filepath, monitor='val_loss', verbose=1, save_best_only=False, mode='max', period=1):
         super(ModelCheckpoint, self).__init__()
         self.monitor = monitor
         self.verbose = verbose
@@ -361,9 +361,6 @@ class ModelCheckpoint(Callback):
         self.period = period
         self.epochs_since_last_save = 0
 
-        if mode not in ['auto', 'min', 'max']:
-            mode = 'auto'
-
         if mode == 'min':
             self.monitor_op = np.less
             self.best = np.Inf
@@ -371,13 +368,9 @@ class ModelCheckpoint(Callback):
             self.monitor_op = np.greater
             self.best = -np.Inf
         else:
-            # TODO: check this one
-            if 'f1' in self.monitor or self.monitor.startswith('f1'):
-                self.monitor_op = np.greater
-                self.best = -np.Inf
-            else:
-                self.monitor_op = np.less
-                self.best = np.Inf
+            self.monitor_op = np.greater
+            self.best = -np.Inf
+
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -431,20 +424,25 @@ class WBLoggingCallback(Callback):
             mode='online' if on else 'disabled',
         )
 
-        self.log_frequency = log_frequency
-        self.loss_values = []
+        self.train_logfreq = log_frequency
 
-        self.other_metrics = []
-        self.other_metric_values = []
-        metrics = [f'{split}{metric}' for metric in metrics for split in ['', 'val_', 'test_']]
-        for me in metrics + other_metrics:
-            self.other_metrics.append(me)
-            self.other_metric_values.append([])
+        # adding unimodal metrics
+        metrics = [f'{metric}{suffix}' for metric in metrics for suffix in ['', '_sar', '_opt']]
+
+        self.train_metrics = list(metrics)
+        self.train_metrics.append('loss')
+        self.train_values = [[] for _ in range(len(self.train_metrics))]
+        for me in other_metrics:
+            self.train_metrics.append(me)
+            self.train_values.append([])
+
+        self.eval_metrics = [f'{split}{metric}' for metric in (metrics + ['loss']) for split in ['', 'val_', 'test_']]
 
         self.epoch = 0
+        self.epochs = None
+        self.steps = None
 
     def on_train_begin(self, logs):
-        self.metrics = ['loss'] + self.model_pytoune.metrics_names
         self.epochs = self.params['epochs']
         self.steps = self.params['steps']
 
@@ -452,41 +450,42 @@ class WBLoggingCallback(Callback):
         self.epoch = epoch
 
     def on_epoch_end(self, epoch, logs):
-        pass
+        log = {'epoch': epoch}
+        for metric, values in logs.items():
+            if metric in self.eval_metrics:
+                log[metric] = values
+        wandb.log(log)
 
     def on_batch_end(self, batch, logs):
-        if not batch % (self.log_frequency + 1) == 0:
-            self.loss_values.append(logs['loss'])
-            for i, metric in enumerate(self.other_metrics):
+        if not batch % (self.train_logfreq + 1) == 0:
+            for i, metric in enumerate(self.train_metrics):
                 if metric in logs.keys():
-                    self.other_metric_values[i].append(logs[metric])
+                    self.train_values[i].append(logs[metric])
         else:
             log_dict = {
-                f'loss': np.mean(self.loss_values),
                 'step': (self.epoch - 1) * self.steps + batch,
             }
 
-            for metric, values in zip(self.other_metrics, self.other_metric_values):
+            for metric, values in zip(self.train_metrics, self.train_values):
                 if metric == 'curation_mode':
-                    log_dict['regular_step_rate'] = np.sum(np.logical_not(values)) / self.log_frequency * 100
-                    log_dict['rebalancing_step_rate'] = np.sum(values) / self.log_frequency * 100
+                    log_dict['regular_step_rate'] = np.sum(np.logical_not(values)) / self.train_logfreq * 100
+                    log_dict['rebalancing_step_rate'] = np.sum(values) / self.train_logfreq * 100
                 if metric == 'caring_modality':
-                    index = self.other_metrics.index('curation_mode')
-                    curation_mode = np.array(self.other_metric_values[index], dtype=bool)
+                    index = self.train_metrics.index('curation_mode')
+                    curation_mode = np.array(self.train_values[index], dtype=bool)
                     actual_rebalancing_steps = np.array(values)[curation_mode]
                     log_dict['rebalancing_step_rate_sar'] = np.sum(np.logical_not(actual_rebalancing_steps)) /\
-                                                            self.log_frequency * 100
-                    log_dict['rebalancing_step_rate_opt'] = np.sum(actual_rebalancing_steps) / self.log_frequency * 100
+                                                            self.train_logfreq * 100
+                    log_dict['rebalancing_step_rate_opt'] = np.sum(actual_rebalancing_steps) / self.train_logfreq * 100
                 else:
                     if values:
-                        log_dict[metric] = np.mean(values)
+                        log_dict[f'train_{metric}'] = np.mean(values)
             wandb.log(log_dict)
-            self._reset_avg_list()
+            self._reset_train_lists()
 
-    def _reset_avg_list(self):
-        self.loss_values = []
-        for i in range(len(self.other_metric_values)):
-            self.other_metric_values[i] = []
+    def _reset_train_lists(self):
+        for i in range(len(self.train_values)):
+            self.train_values[i] = []
 
 
 @gin.configurable
@@ -556,14 +555,14 @@ class ProgressionCallback(Callback):
         return  ', '.join(str_gen)
 
 
-class ValidationProgressionCallback(Callback):
+class EvalProgressionCallback(Callback):
     def __init__(self, phase, metrics_names, steps=None):
         self.params = {}
         self.params['steps'] = steps
         self.params['phase'] = phase 
         self.metrics = metrics_names
 
-        super(ValidationProgressionCallback, self).__init__()
+        super(EvalProgressionCallback, self).__init__()
 
     def _get_metrics_string(self, logs):
         metrics_str_gen = ('{}: {:f}'.format(self.params['phase'] + '_' + k, logs[k]) for k in self.metrics

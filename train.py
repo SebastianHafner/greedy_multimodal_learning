@@ -27,17 +27,12 @@ def blend_loss(y_hat, y):
 
 
 @gin.configurable
-def train(save_path, wd, lr, momentum, batch_size, callbacks=[]):
+def train(save_path, lr, wd, batch_size, callbacks=[]):
 
     model = MMTM_DSUNet()
     train, valid, test = dataset.get_urbanmappingdata(batch_size=batch_size)
 
-    optimizer = torch.optim.SGD(
-        model.parameters(),
-        lr=lr, 
-        weight_decay=wd, 
-        momentum=momentum
-    )
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
 
     callbacks_constructed = []
     for name in callbacks:

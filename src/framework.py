@@ -1,12 +1,10 @@
-import warnings
 import numpy as np
 import timeit
 import torch
-from functools import partial
 import math
 import itertools
 
-from src.callbacks import ValidationProgressionCallback, ProgressionCallback, WBLoggingCallback, CallbackList, Callback
+from src.callbacks import EvalProgressionCallback, ProgressionCallback, WBLoggingCallback, CallbackList, Callback
 from src.utils import numpy_to_torch, torch_to_numpy, torch_to
 
 import logging
@@ -155,12 +153,8 @@ class Model_:
             epoch_begin_time = timeit.default_timer()
 
             # training
-            train_step_iterator = StepIterator(train_generator,
-                                               steps_per_epoch,
-                                               callback_list,
-                                               self.metrics_names,
-                                               self.nummodalities
-                                               )
+            train_step_iterator = StepIterator(train_generator, steps_per_epoch, callback_list, self.metrics_names,
+                                               self.nummodalities)
             self.model.train(True)
             with torch.enable_grad():
                 for step, (x, y) in train_step_iterator:
@@ -278,18 +272,9 @@ class Model_:
     def _eval_generator(self, generator, phase, *, steps=None):
         if steps is None:
             steps = len(generator)
-        
-        step_iterator = StepIterator(
-                            generator, 
-                            steps, 
-                            ValidationProgressionCallback(
-                                phase=phase, 
-                                steps=steps, 
-                                metrics_names=['loss'] + self.metrics_names
-                            ), 
-                            self.metrics_names,
-                            self.nummodalities
-                        )
+
+        eval_callback = EvalProgressionCallback(phase=phase, steps=steps, metrics_names=['loss'] + self.metrics_names)
+        step_iterator = StepIterator(generator, steps, eval_callback, self.metrics_names, self.nummodalities)
 
         self.model.eval()
         with torch.no_grad():
