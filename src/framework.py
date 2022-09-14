@@ -197,7 +197,8 @@ class Model_:
 
             callback_list.on_epoch_end(epoch, epoch_log)
 
-            if self.stop_training: break
+            if self.stop_training:
+                break
 
         callback_list.on_train_end({})
 

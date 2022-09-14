@@ -11,7 +11,7 @@ EarlyStopping.monitor='val_f1'
 
 BiasMitigationStrong.epsilon=0.4
 BiasMitigationStrong.curation_windowsize=5
-BiasMitigationStrong.starting_epoch=1
+BiasMitigationStrong.starting_epoch=2
 BiasMitigationStrong.branchnames=['sar', 'opt']
 BiasMitigationStrong.MMTMnames = ['sar', 'opt']
 

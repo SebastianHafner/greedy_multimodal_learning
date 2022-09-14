@@ -1,35 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Trainer script. Example run command: bin/train.py save_to_folder configs/cnn.gin.
-"""
-import os
 import gin
 from gin.config import _CONFIG
-import torch
-import pickle
 import logging
-from functools import partial
-logger = logging.getLogger(__name__)
-
 from src import dataset
 from src import callbacks as avail_callbacks 
-from src.model import MMTM_MVCNN
+from src.model import MMTM_DSUNet
 from src.training_loop import evalution_loop
 from src.utils import gin_wrap
+from src.metric import f1
 
-from train import blend_loss, acc
+from train import blend_loss
+
+logger = logging.getLogger(__name__)
 
 @gin.configurable
-def eval_(save_path, 
-          target_data_split,
-          pretrained_weights_path,
-          batch_size=128, 
-          callbacks=[],
-          ):
+def eval_(save_path, target_data_split, pretrained_weights_path, batch_size=128, callbacks=[]):
 
-    model = MMTM_MVCNN()
-    train, val, testing = dataset.get_mvdcndata(batch_size=batch_size)
+    model = MMTM_DSUNet()
+    train, val, testing = dataset.get_urbanmappingdata(batch_size=batch_size)
 
     if target_data_split == 'test':
         target_data = testing
@@ -49,7 +38,7 @@ def eval_(save_path,
 
     evalution_loop(model=model, 
                    loss_function=blend_loss, 
-                   metrics=[acc],
+                   metrics=[f1],
                    config=_CONFIG, 
                    save_path=save_path, 
                    test=target_data,  

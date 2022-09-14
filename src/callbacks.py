@@ -269,6 +269,7 @@ class BiasMitigationStrong(Callback):
         if epoch >= self.starting_epoch:
             self.unlock = True
 
+
 @gin.configurable
 class BiasMitigationRandom(Callback):
 
@@ -306,25 +307,35 @@ class BiasMitigationRandom(Callback):
 
 
 @gin.configurable
-class CompletedStopping(Callback):
-    def __init__(self, *, monitor='f1', patience=2, verbose=True):
-        super(CompletedStopping, self).__init__()
+class EarlyStopping(Callback):
+    def __init__(self, *, monitor='val_f1', patience=2, verbose=True, mode='max'):
+        super(EarlyStopping, self).__init__()
         self.monitor = monitor
         self.patience = patience
         self.verbose = verbose
         self.stopped_epoch = 0
-
-    def on_train_begin(self, logs):
-        self.stopped_epoch = 0
         self.counter = 0
 
+        if mode == 'min':
+            self.monitor_op = np.less
+            self.best = np.Inf
+        elif mode == 'max':
+            self.monitor_op = np.greater
+            self.best = -np.Inf
+        else:
+            self.monitor_op = np.greater
+            self.best = -np.Inf
+
     def on_epoch_end(self, epoch, logs):
-        current = logs[self.monitor]
-        if current == 100:
+        current = logs.get(self.monitor)
+        if self.monitor_op(current, self.best):
+            self.best = current
+            self.counter = 0
+        else:
             self.counter += 1
-            
+
         if self.counter >= self.patience:
-            
+
             self.stopped_epoch = epoch
             self.model_pytoune.stop_training = True
 
@@ -371,7 +382,6 @@ class ModelCheckpoint(Callback):
             self.monitor_op = np.greater
             self.best = -np.Inf
 
-
     def __getstate__(self):
         state = self.__dict__.copy()
         del state['model']
@@ -414,7 +424,7 @@ class ModelCheckpoint(Callback):
 
 @gin.configurable
 class WBLoggingCallback(Callback):
-    def __init__(self, on: bool, run_name: str, project: str, log_frequency: int, metrics, other_metrics):
+    def __init__(self, on: bool, run_name: str, project: str, log_frequency: int, metrics, other_metrics: list = None):
 
         wandb.init(
             name=run_name,
@@ -432,9 +442,10 @@ class WBLoggingCallback(Callback):
         self.train_metrics = list(metrics)
         self.train_metrics.append('loss')
         self.train_values = [[] for _ in range(len(self.train_metrics))]
-        for me in other_metrics:
-            self.train_metrics.append(me)
-            self.train_values.append([])
+        if other_metrics is not None:
+            for me in other_metrics:
+                self.train_metrics.append(me)
+                self.train_values.append([])
 
         self.eval_metrics = [f'{split}{metric}' for metric in (metrics + ['loss']) for split in ['', 'val_', 'test_']]
 
@@ -448,6 +459,7 @@ class WBLoggingCallback(Callback):
 
     def on_epoch_begin(self, epoch, logs):
         self.epoch = epoch
+        self._reset_train_lists()
 
     def on_epoch_end(self, epoch, logs):
         log = {'epoch': epoch}
@@ -464,6 +476,7 @@ class WBLoggingCallback(Callback):
         else:
             log_dict = {
                 'step': (self.epoch - 1) * self.steps + batch,
+                'epoch_float': self.epoch - 1 + batch / self.steps,
             }
 
             for metric, values in zip(self.train_metrics, self.train_values):
@@ -490,11 +503,12 @@ class WBLoggingCallback(Callback):
 
 @gin.configurable
 class ProgressionCallback(Callback):
-    def __init__(self, other_metrics: list):
+    def __init__(self, other_metrics: list = None):
          
         self.other_metrics = []
-        for me in other_metrics:
-            self.other_metrics.append(me)
+        if other_metrics is not None:
+            for me in other_metrics:
+                self.other_metrics.append(me)
 
     def on_train_begin(self, logs):
         self.metrics = ['loss'] + self.model_pytoune.metrics_names
