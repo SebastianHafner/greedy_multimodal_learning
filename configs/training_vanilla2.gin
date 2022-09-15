@@ -1,0 +1,30 @@
+# Train configuration
+train.batch_size=4
+train.lr=0.0001
+train.wd=0.01
+train.callbacks=['EarlyStopping']
+
+ModelCheckpoint.monitor='val_f1'
+
+EarlyStopping.patience=5
+EarlyStopping.monitor='val_f1'
+
+WBLoggingCallback.on=True
+WBLoggingCallback.log_frequency=100
+WBLoggingCallback.project='balanced_learning_v2'
+
+# Training loop
+training_loop.nummodalities=2
+training_loop.n_epochs=101
+
+# Dataset
+get_urbanmappingdata.seed=2
+get_urbanmappingdata.num_workers=0
+get_urbanmappingdata.train_sites=['albuquerque', 'atlantaeast', 'atlantawest', 'charlston', 'columbus', 'dallas',
+    'denver', 'elpaso', 'houston', 'kansascity', 'lasvegas', 'losangeles', 'miami', 'minneapolis', 'montreal',
+    'phoenix', 'quebec', 'saltlakecity', 'sandiego', 'santafe', 'seattle', 'stgeorge', 'toronto', 'tucson',
+    'winnipeg', 'sydney']
+get_urbanmappingdata.val_sites=['calgary', 'newyork', 'sanfrancisco', 'vancouver']
+get_urbanmappingdata.test_sites=['spacenet7']
+get_urbanmappingdata.sar_bands=['VV', 'VH']
+get_urbanmappingdata.opt_bands=['B2', 'B3', 'B4', 'B8']
