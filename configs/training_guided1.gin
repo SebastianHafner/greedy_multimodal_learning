@@ -1,5 +1,5 @@
 # Train configuration
-train.batch_size=4
+train.batch_size=16
 train.lr=0.0001
 train.wd=0.01
 train.callbacks=['EarlyStopping', 'BiasMitigationStrong']
