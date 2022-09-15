@@ -135,6 +135,7 @@ class Model_:
                    validation_steps=None,
                    test_steps=None,
                    callbacks=[],
+                   device='cuda',
                    ):
 
         self._transfer_optimizer_state_to_right_device()
@@ -158,6 +159,8 @@ class Model_:
             with torch.enable_grad():
                 for step, (x, y) in train_step_iterator:
                     step['size'] = self._get_batch_size(x, y)
+                    x = [tensor.to(device) for tensor in x]
+                    y = y.to(device)
 
                     self.optimizer.zero_grad()
                     loss_tensor, info = self._compute_loss_and_metrics(x, y)
@@ -216,9 +219,9 @@ class Model_:
             record['metrics'] = self._compute_metrics(y, pred_y_eval)
             record['modalitywise_metrics'] = self._compute_metrics_multiple_inputs(y, pred_y)
 
-        if self.model.saving_mmtm_scales:
+        if self.model.module.saving_mmtm_scales:
             record['mmtmscales_list'] = scales
-        if self.model.saving_mmtm_squeeze_array:
+        if self.model.module.saving_mmtm_squeeze_array:
             record['squeezedmaps_array_list'] = squeezed_mps
 
         return loss, record

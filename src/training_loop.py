@@ -56,6 +56,7 @@ def training_loop(model, loss_function, metrics, optimizer, config, save_path,  
         steps_per_epoch=steps_per_epoch,
         epochs=n_epochs - 1,
         callbacks=callbacks,
+        device=device,
     )
 
 

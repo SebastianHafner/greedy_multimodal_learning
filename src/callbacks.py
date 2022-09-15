@@ -340,7 +340,7 @@ class ModelCheckpoint(Callback):
     def __init__(self, save_path, run_name, monitor='val_f1', verbose=1, save_best_only=True, mode='max', period=1):
         super(ModelCheckpoint, self).__init__()
         self.save_path = Path(save_path)
-        self.run_name = run_name,
+        self.run_name = str(run_name),
         self.monitor = monitor
         self.verbose = verbose
         self.save_best_only = save_best_only
@@ -374,7 +374,7 @@ class ModelCheckpoint(Callback):
         if self.epochs_since_last_save >= self.period:
             self.epochs_since_last_save = 0
             if self.save_best_only:
-                file_name = Path(self.save_path) / f'model_best_val_{self.run_name}.pt'
+                file_name = Path(self.save_path) / f'model_best_val_{self.run_name[0]}.pt'
                 current = logs.get(self.monitor)
                 if current is None:
                     logging.warning(f'Can save best model only with {self.monitor} available, skipping', RuntimeWarning)
@@ -384,12 +384,12 @@ class ModelCheckpoint(Callback):
                             print(f'Epoch {epoch}: {self.monitor} improved from {self.best:.2f} to {current:.2f}')
                             print(f'saving model to {file_name}')
                         self.best = current
-                        save_weights(self.model, self.optimizer, self.filepath)
+                        save_weights(self.model, self.optimizer, file_name)
                     else:
                         if self.verbose > 0:
                             print(f'Epoch {epoch}: {self.monitor} did not improve')
             else:
-                file_name = Path(self.save_path) / f'model_epoch{epoch}_{self.run_name}.pt'
+                file_name = Path(self.save_path) / f'model_epoch{epoch}_{self.run_name[0]}.pt'
                 if self.verbose > 0:
                     print(f'Epoch {epoch}: saving model to {file_name}')
                 save_weights(self.model, self.optimizer, file_name)
