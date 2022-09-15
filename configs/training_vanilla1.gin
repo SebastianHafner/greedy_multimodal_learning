@@ -9,7 +9,7 @@ ModelCheckpoint.monitor='val_f1'
 EarlyStopping.patience=5
 EarlyStopping.monitor='val_f1'
 
-WBLoggingCallback.on=False
+WBLoggingCallback.on=True
 WBLoggingCallback.log_frequency=100
 WBLoggingCallback.project='balanced_learning_v2'
 
@@ -18,7 +18,7 @@ training_loop.nummodalities=2
 training_loop.n_epochs=101
 
 # Dataset
-get_urbanmappingdata.seed=7
+get_urbanmappingdata.seed=1
 get_urbanmappingdata.num_workers=0
 get_urbanmappingdata.train_sites=['albuquerque', 'atlantaeast', 'atlantawest', 'charlston', 'columbus', 'dallas',
     'denver', 'elpaso', 'houston', 'kansascity', 'lasvegas', 'losangeles', 'miami', 'minneapolis', 'montreal',

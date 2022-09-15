@@ -7,7 +7,7 @@ import torch
 import logging
 
 from src import dataset
-from src import callbacks as avail_callbacks 
+from src import callbacks as avail_callbacks
 from src.model import MMTM_DSUNet
 from src.training_loop import training_loop
 from src.utils import gin_wrap
@@ -27,10 +27,12 @@ def blend_loss(y_hat, y):
 
 
 @gin.configurable
-def train(save_path, lr, wd, batch_size, callbacks=[]):
+def train(config, dataset_path, save_path, lr, wd, batch_size, callbacks=[]):
+
+    _CONFIG['name'] = config
 
     model = MMTM_DSUNet()
-    train, valid, test = dataset.get_urbanmappingdata(batch_size=batch_size)
+    train, valid, test = dataset.get_urbanmappingdata(root_dir=dataset_path, batch_size=batch_size)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
 
@@ -39,6 +41,7 @@ def train(save_path, lr, wd, batch_size, callbacks=[]):
         if name in avail_callbacks.__dict__:
             clbk = avail_callbacks.__dict__[name]()
             callbacks_constructed.append(clbk)
+    callbacks_constructed.append(avail_callbacks.ModelCheckpoint(save_path, config))
 
     training_loop(
         model=model,

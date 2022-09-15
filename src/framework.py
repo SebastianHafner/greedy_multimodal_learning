@@ -111,8 +111,7 @@ class StepIterator:
 
 
 class Model_:
-    def __init__(self, model, optimizer, loss_function, nummodalities, *, metrics=[], 
-        verbose=True, hyper_optim=None, vg=None):
+    def __init__(self, model, optimizer, loss_function, nummodalities, *, metrics=[], verbose=True, config):
         self.model = model
         self.optimizer = optimizer
         self.loss_function = loss_function
@@ -124,6 +123,7 @@ class Model_:
         self.nummodalities = nummodalities
         self.curation_mode = False
         self.caring_modality = None
+        self.config = config
 
     def train_loop(self,
                    train_generator,
@@ -140,14 +140,13 @@ class Model_:
         self._transfer_optimizer_state_to_right_device()
         callback_list = CallbackList(callbacks)
         callback_list.append(ProgressionCallback())
-        callback_list.append(WBLoggingCallback(metrics=self.metrics_names))
+        callback_list.append(WBLoggingCallback(metrics=self.metrics_names, run_name=self.config.get('name')))
         callback_list.set_model_pytoune(self)
         callback_list.set_params({'epochs': epochs, 'steps': steps_per_epoch})
 
         self.stop_training = False
 
         callback_list.on_train_begin({})
-        val_dict, test_dict = {}, {}
         for epoch in range(1, epochs + 1):
             callback_list.on_epoch_begin(epoch, {})
             epoch_begin_time = timeit.default_timer()
@@ -172,9 +171,6 @@ class Model_:
                     step['loss'] = loss
                     if math.isnan(step['loss']):
                         self.stop_training = True
-
-                    # if step['number'] % 11 == 0:
-                    #     break
 
             train_dict = {
                 'loss': train_step_iterator.loss,

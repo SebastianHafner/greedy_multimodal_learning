@@ -1,24 +1,15 @@
 # -*- coding: utf-8 -*-
-"""
-Callbacks implementation. Inspired by Keras.
-"""
 
 import timeit
 import gin
 import sys
 import numpy as np
-import pandas as pd
-import os
-import pickle
 import logging
-import time
-import datetime
-import json
-import copy
 import random
 import itertools
 import torch
 import wandb
+from pathlib import Path
 
 from gin.config import _OPERATIVE_CONFIG
 
@@ -342,32 +333,16 @@ class EarlyStopping(Callback):
     def on_train_end(self, logs):
         if self.stopped_epoch > 0 and self.verbose:
             print('Epoch %05d: completed stopping' % (self.stopped_epoch + 1))
- 
+
 
 @gin.configurable
-class ReduceLROnPlateauPyTorch(Callback):
-    def __init__(self, metric, factor=0.3, patience=10):
-        self.metric = metric 
-        self.factor = factor
-        self.patience=patience
-    
-    def on_train_begin(self, logs):
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, 
-          mode='min', 
-          factor=self.factor , 
-          patience=self.patience, 
-          verbose=True, threshold=0.001, threshold_mode='rel', cooldown=0, min_lr=1e-6, eps=1e-08)
-
-    def on_epoch_end(self, epoch, logs):
-        self.scheduler.step(logs[self.metric])
-
-
 class ModelCheckpoint(Callback):
-    def __init__(self, filepath, monitor='val_loss', verbose=1, save_best_only=False, mode='max', period=1):
+    def __init__(self, save_path, run_name, monitor='val_f1', verbose=1, save_best_only=True, mode='max', period=1):
         super(ModelCheckpoint, self).__init__()
+        self.save_path = Path(save_path)
+        self.run_name = run_name,
         self.monitor = monitor
         self.verbose = verbose
-        self.filepath = filepath
         self.save_best_only = save_best_only
         self.period = period
         self.epochs_since_last_save = 0
@@ -399,27 +374,27 @@ class ModelCheckpoint(Callback):
         if self.epochs_since_last_save >= self.period:
             self.epochs_since_last_save = 0
             if self.save_best_only:
+                file_name = Path(self.save_path) / f'model_best_val_{self.run_name}.pt'
                 current = logs.get(self.monitor)
                 if current is None:
-                    logging.warning('Can save best model only with %s available, '
-                                    'skipping.' % (self.monitor), RuntimeWarning)
+                    logging.warning(f'Can save best model only with {self.monitor} available, skipping', RuntimeWarning)
                 else:
                     if self.monitor_op(current, self.best):
                         if self.verbose > 0:
-                            print('Epoch %05d: %s improved from %0.5f to %0.5f,'
-                                  ' saving model to %s'
-                                  % (epoch, self.monitor, self.best,
-                                     current, self.filepath))
+                            print(f'Epoch {epoch}: {self.monitor} improved from {self.best:.2f} to {current:.2f}')
+                            print(f'saving model to {file_name}')
                         self.best = current
                         save_weights(self.model, self.optimizer, self.filepath)
                     else:
                         if self.verbose > 0:
-                            print('Epoch %05d: %s did not improve' %
-                                  (epoch, self.monitor))
+                            print(f'Epoch {epoch}: {self.monitor} did not improve')
             else:
+                file_name = Path(self.save_path) / f'model_epoch{epoch}_{self.run_name}.pt'
                 if self.verbose > 0:
-                    print('Epoch %05d: saving model to %s' % (epoch, self.filepath))
-                    save_weights(self.model, self.optimizer, self.filepath)
+                    print(f'Epoch {epoch}: saving model to {file_name}')
+                save_weights(self.model, self.optimizer, file_name)
+
+
 
 
 @gin.configurable

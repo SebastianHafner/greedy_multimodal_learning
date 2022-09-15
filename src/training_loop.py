@@ -1,44 +1,11 @@
 # -*- coding: utf-8 -*-
-"""
-A gorgeous, self-contained, training loop. Uses Poutyne implementation, but this can be swapped later.
-"""
 
 import logging
-import os
-import tqdm
-import pickle
-from functools import partial
-
-import numpy as np
-import pandas as pd
 import torch
 import gin
-
-from src.callbacks import ModelCheckpoint, LambdaCallback
-from src.utils import save_weights
 from src.framework import Model_
 
 logger = logging.getLogger(__name__)
-
-
-def _construct_default_callbacks(model, optimizer, save_path, checkpoint_monitor):
-    callbacks = []
-
-    callbacks.append(
-        ModelCheckpoint(
-            monitor=checkpoint_monitor,
-            save_best_only=True,
-            mode='max',
-            filepath=os.path.join(save_path, "model_best_val.pt"))
-    )
-    
-    def save_weights_fnc(epoch, logs):
-        logger.info("Saving model from epoch " + str(epoch))
-        save_weights(model, optimizer, os.path.join(save_path, "model_last_epoch.pt"))
-
-    callbacks.append(LambdaCallback(on_epoch_end=save_weights_fnc))
-
-    return callbacks
 
 
 def _load_pretrained_model(model, save_path):
@@ -51,17 +18,15 @@ def _load_pretrained_model(model, save_path):
 
 @gin.configurable
 def training_loop(model, loss_function, metrics, optimizer, config, save_path,  steps_per_epoch, train=None,
-                  valid=None, test=None, test_steps=None, validation_steps=None, use_gpu=False, device_numbers=[0],
-                  custom_callbacks=[], checkpoint_monitor="val_f1", n_epochs=100, verbose=True, nummodalities=2):
+                  valid=None, test=None, test_steps=None, validation_steps=None, custom_callbacks=[],
+                  n_epochs=100, verbose=True, nummodalities=2):
 
     callbacks = list(custom_callbacks)
-
-    callbacks += _construct_default_callbacks(model, optimizer, save_path, checkpoint_monitor)
     
     # Configure callbacks
     for clbk in callbacks:
         clbk.set_save_path(save_path)
-        clbk.set_model(model, ignore=False)  # TODO: Remove this trick
+        clbk.set_model(model, ignore=False)
         clbk.set_optimizer(optimizer)
         clbk.set_config(config)
 
@@ -72,15 +37,15 @@ def training_loop(model, loss_function, metrics, optimizer, config, save_path,  
         metrics=metrics,
         verbose=verbose,
         nummodalities=nummodalities,
+        config=config,
     )
             
     for clbk in callbacks:
         clbk.set_model_pytoune(model)
 
-    if use_gpu and torch.cuda.is_available(): 
-        base_device = torch.device("cuda:{}".format(device_numbers[0]))
-        model.to(base_device)
-        logger.info("Sending model to {}".format(base_device))
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    logger.info(f"Sending model to {device}")
         
     _ = model.train_loop(
         train,
@@ -123,10 +88,9 @@ def evalution_loop(model, loss_function, metrics, config,
         nummodalities=nummodalities
     )
 
-    if use_gpu and torch.cuda.is_available(): 
-        base_device = torch.device("cuda:{}".format(device_numbers[0]))
-        model.to(base_device)
-        logger.info("Sending model to {}".format(base_device))
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    logger.info(f"Sending model to {device}")
     
     model.eval_loop(
         test,  
