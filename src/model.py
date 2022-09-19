@@ -15,14 +15,8 @@ from src.balanced_mmtm import get_rescale_weights
 
 @gin.configurable
 class MMTM_DSUNet(nn.Module):
-    def __init__(self,
-                 mmtm_off=False,
-                 mmtm_rescale_eval_file_path=None,
-                 mmtm_rescale_training_file_path=None,
-                 device='cuda:0',
-                 saving_mmtm_scales=False,
-                 saving_mmtm_squeeze_array=False,
-                 ):
+    def __init__(self, mmtm_off=False, mmtm_rescale_eval_file_path=None, mmtm_rescale_training_file_path=None,
+                 device='cuda', saving_mmtm_scales=False, saving_mmtm_squeeze_array=False):
         super(MMTM_DSUNet, self).__init__()
 
         self.mmtm_off = mmtm_off
@@ -76,7 +70,6 @@ class MMTM_DSUNet(nn.Module):
 
         self.outc_sar = OutConv(64, 1)
         self.outc_opt = OutConv(64, 1)
-
 
     def forward(self, x_sar, x_opt, curation_mode=False, caring_modality=None):
 

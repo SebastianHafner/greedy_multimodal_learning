@@ -4,6 +4,7 @@ import logging
 import torch
 import gin
 from src.framework import Model_
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -61,16 +62,10 @@ def training_loop(model, loss_function, metrics, optimizer, config, save_path,  
 
 
 @gin.configurable
-def evalution_loop(model, loss_function, metrics, config, 
-                   save_path,
-                   test=None,  test_steps=None,
-                   use_gpu=False, device_numbers=[0],
-                   custom_callbacks=[],  
-                   pretrained_weights_path=None,
-                   nummodalities=2,
-                  ):
+def evalution_loop(model, loss_function, metrics, config, save_path, test=None,  test_steps=None, custom_callbacks=[],
+                   nummodalities=2,):
 
-    
+    pretrained_weights_path = Path(save_path) / 'networks' / f'model_best_val_{config["name"]}.pt'
     _load_pretrained_model(model, pretrained_weights_path)
 
     callbacks = list(custom_callbacks)
@@ -86,7 +81,8 @@ def evalution_loop(model, loss_function, metrics, config,
         optimizer=None,
         loss_function=loss_function,
         metrics=metrics,
-        nummodalities=nummodalities
+        nummodalities=nummodalities,
+        config=config,
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

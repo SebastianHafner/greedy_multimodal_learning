@@ -283,8 +283,6 @@ class Model_:
                 loss_tensor, info = self._compute_loss_and_metrics(x, y)
                 step['loss'] = float(loss_tensor)
                 step.update(info)
-                # if step['number'] == 11:
-                #     break
 
         metrics_dict = {
             f'{phase}_{metric_name}': metric for metric_name, metric in step_iterator.metrics.items()

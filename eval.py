@@ -9,25 +9,21 @@ from src.model import MMTM_DSUNet
 from src.training_loop import evalution_loop
 from src.utils import gin_wrap
 from src.metric import f1
+import torch
 
 from train import blend_loss
 
 logger = logging.getLogger(__name__)
 
+
 @gin.configurable
-def eval_(save_path, target_data_split, pretrained_weights_path, batch_size=128, callbacks=[]):
+def eval_(config, dataset_path, save_path, batch_size=4, callbacks=[]):
+
+    _CONFIG['name'] = config
 
     model = MMTM_DSUNet()
-    train, val, testing = dataset.get_urbanmappingdata(batch_size=batch_size)
-
-    if target_data_split == 'test':
-        target_data = testing
-    elif target_data_split == 'train':
-        target_data = train
-    elif target_data_split == 'val':
-        target_data = val
-    else:
-        raise NotImplementedError 
+    model = torch.nn.DataParallel(model)
+    train, val, test = dataset.get_urbanmappingdata(dataset_path, batch_size=batch_size)
 
     # Create dynamically callbacks
     callbacks_constructed = []
@@ -36,15 +32,16 @@ def eval_(save_path, target_data_split, pretrained_weights_path, batch_size=128,
             clbk = avail_callbacks.__dict__[name]()
             callbacks_constructed.append(clbk)
 
-    evalution_loop(model=model, 
-                   loss_function=blend_loss, 
-                   metrics=[f1],
-                   config=_CONFIG, 
-                   save_path=save_path, 
-                   test=target_data,  
-                   test_steps=len(target_data),
-                   custom_callbacks=callbacks_constructed,
-                   pretrained_weights_path=pretrained_weights_path)
+    mmtm_features_available = False
+    if not mmtm_features_available:
+        model.module.saving_mmtm_squeeze_array = True
+        evalution_loop(model=model, loss_function=blend_loss, metrics=[f1], config=_CONFIG, save_path=save_path,
+                       test=train, test_steps=len(train), custom_callbacks=callbacks_constructed)
+
+    model.module.saving_mmtm_squeeze_array = False
+    model.module.mmtm_off = True
+    evalution_loop(model=model,  loss_function=blend_loss, metrics=[f1], config=_CONFIG,  save_path=save_path,
+                   test=test, test_steps=len(test), custom_callbacks=callbacks_constructed)
 
 
 if __name__ == "__main__":

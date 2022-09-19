@@ -33,7 +33,7 @@ def train(config, dataset_path, save_path, lr, wd, batch_size, callbacks=[]):
 
     model = MMTM_DSUNet()
     model = torch.nn.DataParallel(model)
-    train, valid, test = dataset.get_urbanmappingdata(root_dir=dataset_path, batch_size=batch_size)
+    train, valid, test = dataset.get_urbanmappingdata(dataset_path, batch_size=batch_size)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
 

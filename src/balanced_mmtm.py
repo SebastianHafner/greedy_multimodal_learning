@@ -14,21 +14,15 @@ from src.utils import numpy_to_torch, torch_to
 
 @gin.configurable
 class MMTM_mitigate(nn.Module):
-    def __init__(self, 
-            dim_sar,
-            dim_opt,
-            ratio, 
-            device=0,
-            SEonly=False, 
-            shareweight=False):
+    def __init__(self, dim_sar, dim_opt, ratio, device='cuda', SEonly=False, shareweight=False):
         super(MMTM_mitigate, self).__init__()
         dim = dim_sar + dim_opt
         dim_out = int(2*dim/ratio)
         self.SEonly = SEonly
         self.shareweight = shareweight
 
-        self.running_avg_weight_sar = torch.zeros(dim_sar).to("cuda:{}".format(device))
-        self.running_avg_weight_opt = torch.zeros(dim_opt).to("cuda:{}".format(device))
+        self.running_avg_weight_sar = torch.zeros(dim_sar).to(device)
+        self.running_avg_weight_opt = torch.zeros(dim_opt).to(device)
         self.step = 0
 
         if self.SEonly:
@@ -46,16 +40,8 @@ class MMTM_mitigate(nn.Module):
         self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
 
-    def forward(self, 
-                sar,
-                opt,
-                return_scale=False,
-                return_squeezed_mps=False,
-                turnoff_cross_modal_flow=False,
-                average_squeezemaps=None,
-                curation_mode=False,
-                caring_modality=0,
-                ):
+    def forward(self, sar, opt, return_scale=False, return_squeezed_mps=False, turnoff_cross_modal_flow=False,
+                average_squeezemaps=None, curation_mode=False, caring_modality=0):
 
         if self.SEonly:
             tview = sar.view(sar.shape[:2] + (-1,))
