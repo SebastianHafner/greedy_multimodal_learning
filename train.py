@@ -9,54 +9,66 @@ import logging
 from src import dataset
 from src import callbacks as avail_callbacks
 from src.model import MMTM_DSUNet
-from src.training_loop import training_loop
 from src.utils import gin_wrap
-from src.loss_function import power_jaccard_loss
+from src.loss_function import blend_loss
 from src.metric import f1
+from src.framework import Framework
 
 logger = logging.getLogger(__name__)
 
 
-def blend_loss(y_hat, y):
-    loss_func = power_jaccard_loss
-    losses = []
-    for y_pred in y_hat:
-        losses.append(loss_func(y_pred, y))
-
-    return sum(losses)
-
-
 @gin.configurable
-def train(config, dataset_path, save_path, lr, wd, batch_size, callbacks=[]):
+def train(config, dataset_path, save_path, lr, wd, batch_size, n_epochs, nummodalities, other_callbacks: list):
 
     _CONFIG['name'] = config
 
     model = MMTM_DSUNet()
     model = torch.nn.DataParallel(model)
-    train, valid, test = dataset.get_urbanmappingdata(dataset_path, batch_size=batch_size)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    logger.info(f"Sending model to {device}")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
 
-    callbacks_constructed = []
-    for name in callbacks:
+    metrics = [f1]
+
+    framework = Framework(
+        model=model,
+        optimizer=optimizer,
+        loss_function=blend_loss,
+        metrics=metrics,
+        verbose=True,
+        nummodalities=nummodalities,
+        config=_CONFIG,
+        device=device,
+    )
+
+    train, valid, test = dataset.get_urbanmappingdata(dataset_path, batch_size=batch_size)
+
+    callbacks = []
+    for name in other_callbacks:
         if name in avail_callbacks.__dict__:
             clbk = avail_callbacks.__dict__[name]()
-            callbacks_constructed.append(clbk)
-    callbacks_constructed.append(avail_callbacks.ModelCheckpoint(save_path, config))
+            callbacks.append(clbk)
 
-    training_loop(
-        model=model,
-        optimizer=optimizer, 
-        loss_function=blend_loss, 
-        metrics=[f1],
-        train=train, valid=valid, test=test, 
-        steps_per_epoch=len(train),
-        validation_steps=len(valid),
-        test_steps=len(test),
-        save_path=save_path, 
-        config=_CONFIG,
-        custom_callbacks=callbacks_constructed
-    )
+    # default callbacks
+    callbacks.append(avail_callbacks.ModelCheckpoint(save_path, config))
+    callbacks.append(avail_callbacks.ProgressionCallback())
+    callbacks.append(avail_callbacks.WBLoggingCallback(metrics=[m.__name__ for m in metrics], run_name=config))
+
+    # Configure callbacks
+    for clbk in callbacks:
+        clbk.set_save_path(save_path)
+        clbk.set_model(model, ignore=False)
+        clbk.set_optimizer(optimizer)
+        clbk.set_config(config)
+        clbk.set_model_pytoune(framework)
+
+    callback_list = avail_callbacks.CallbackList(callbacks)
+    callback_list.set_params({'epochs': n_epochs, 'steps': len(train)})
+
+    _ = framework.train_loop(train, valid_generator=valid, test_generator=test, epochs=n_epochs,
+                         callback_list=callback_list)
 
 
 if __name__ == "__main__":

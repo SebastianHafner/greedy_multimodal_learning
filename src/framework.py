@@ -2,190 +2,138 @@ import numpy as np
 import timeit
 import torch
 import math
-import itertools
 
-from src.callbacks import EvalProgressionCallback, ProgressionCallback, WBLoggingCallback, CallbackList, Callback
-from src.utils import numpy_to_torch, torch_to_numpy, torch_to
+from src.callbacks import EvalProgressionCallback
 
 import logging
 logger = logging.getLogger(__name__)
 
-warning_settings = {
-    'batch_size': 'warn'
-}
 
-def cycle(iterable): 
-    while True:
-        for x in iterable:
-            yield x
+class Framework:
+    def __init__(self, model, optimizer, loss_function, nummodalities, *, metrics=[], verbose=True, config, device):
+        self.model = model
+        self.optimizer = optimizer
+        self.loss_function = loss_function
 
+        self.modality_names = ['sar', 'opt']
 
-def _get_step_iterator(steps, generator):
-    count_iterator = range(1, steps + 1) if steps is not None else itertools.count(1)
-    generator = cycle(generator) if steps is not None else generator
-    return zip(count_iterator, generator)
+        self.metrics = metrics
+        self.metrics_names = [metric.__name__ for metric in self.metrics]
+        self.modalitywise_metrics_names = [f'{x}_{m}' for x in self.metrics_names for m in self.modality_names]
+        self.all_metrics_names = list(self.metrics_names) +\
+                                 [f'{x}_{m}' for x in list(self.metrics_names) for m in self.modality_names] + ['loss']
 
-
-class StepIterator:
-    def __init__(self, generator, steps_per_epoch, callback, metrics_names, nummodalities):
-        self.generator = generator
-        self.steps_per_epoch = steps_per_epoch
-        self.callback = callback
-        self.metrics_names = metrics_names
+        self.verbose = verbose
+        self.verbose_logs = {} 
         self.nummodalities = nummodalities
 
+        self.config = config
+        self.device = device
+        self.stop_training = None
+
+        # balanced multi-modal learning
+        self.curation_mode = False
+        self.caring_modality = None
+
+        self.defaultfields = ['indices', 'loss', 'metrics', 'viewwises_metrics', 'number', 'size']
+
+        # iterator values training
         self.losses_sum = 0.
-        self.metrics_sum = np.zeros(len(self.metrics_names))
-        self.metrics_permodal_sum = np.zeros((nummodalities, len(self.metrics_names)))
+        self.metrics_sum = np.zeros(len(self.metrics))
+        self.metrics_permodal_sum = np.zeros((nummodalities, len(self.metrics)))
         self.sizes_sum = 0.
         self.extra_lists = {}
         self.indices_list = []
 
-        self.defaultfields = ['indices', 'loss', 'metrics', 'viewwises_metrics', 'number', 'size']
+        # iterator values evaluation
+        self.eval_losses_sum = 0.
+        self.eval_metrics_sum = np.zeros(len(self.metrics))
+        self.eval_metrics_permodal_sum = np.zeros((nummodalities, len(self.metrics)))
+        self.eval_sizes_sum = 0.
+        self.eval_extra_lists = {}
+        self.eval_indices_list = []
 
-    @property
-    def loss(self):
-        if self.sizes_sum == 0:
-            return 0
-        else:
-            return self.losses_sum / self.sizes_sum
+    def train_loop(self, train_generator, test_generator=None, valid_generator=None, *, epochs=1000,
+                   callback_list=None):
 
-    @property
-    def metrics(self):
-        if self.sizes_sum == 0:
-            return dict(zip(self.metrics_names, np.zeros(len(self.metrics_names))))
-        else:
-            metrics_dict = dict(zip(self.metrics_names, self.metrics_sum / self.sizes_sum))
-            for i in range(self.nummodalities):
-                names = [f'{x}_{"sar" if i == 0 else "opt"}' for x in self.metrics_names]
-                metrics_dict.update(dict(zip(names, self.metrics_permodal_sum[i]/self.sizes_sum)))
-
-            return metrics_dict
-
-    @property
-    def indices(self):
-        if self.sizes_sum == 0:
-            return []
-        elif self.indices_list[0] is None:
-            return []
-        else:
-            return np.concatenate(self.indices_list, axis=0)
-
-    def __iter__(self):
-        for batch_ind, data in _get_step_iterator(self.steps_per_epoch, self.generator):
-            batch_begin_time = timeit.default_timer()
-            self.callback.on_batch_begin(batch_ind, {})
-            self.callback.on_forward_begin(batch_ind, data)
-            step_data = {
-                'number': batch_ind,
-                'indices': data[0]
-            }
-            yield step_data, data[1:]
-
-            self.losses_sum += step_data['loss'] * step_data['size']
-            self.metrics_sum += step_data['metrics'] * step_data['size']
-            self.metrics_permodal_sum += step_data['modalitywise_metrics'] * step_data['size']
-            self.sizes_sum += step_data['size']
-            self.indices_list.append(step_data['indices'])
-
-            metrics_dict = dict(zip(self.metrics_names, step_data['metrics']))
-
-            for i in range(self.nummodalities):
-                names = [f'{x}_{"sar" if i == 0 else "opt"}' for x in self.metrics_names]
-                metrics_dict.update(dict(zip(names, step_data['modalitywise_metrics'][i])))
-
-            for key, value in step_data.items():
-                if key not in self.defaultfields:
-                    if key in self.extra_lists:
-                        self.extra_lists[key].append(value)
-                    else:
-                        self.extra_lists[key] = [value]
-                    
-            batch_total_time = timeit.default_timer() - batch_begin_time
-
-            batch_logs = {'batch': batch_ind, 'size': step_data['size'], 
-                          'time': batch_total_time, 'batch_begin_time': batch_begin_time, 
-                          'loss': step_data['loss'], **metrics_dict}
-
-            self.callback.on_batch_end(batch_ind, batch_logs)
-
-
-class Model_:
-    def __init__(self, model, optimizer, loss_function, nummodalities, *, metrics=[], verbose=True, config):
-        self.model = model
-        self.optimizer = optimizer
-        self.loss_function = loss_function
-        self.metrics = metrics
-        self.metrics_names = [metric.__name__ for metric in self.metrics]
-        self.device = None
-        self.verbose = verbose
-        self.verbose_logs = {} 
-        self.nummodalities = nummodalities
-        self.curation_mode = False
-        self.caring_modality = None
-        self.config = config
-
-    def train_loop(self,
-                   train_generator,
-                   test_generator=None,
-                   valid_generator=None,
-                   *,
-                   epochs=1000,
-                   steps_per_epoch=None,
-                   validation_steps=None,
-                   test_steps=None,
-                   callbacks=[],
-                   device='cuda',
-                   ):
-
-        self._transfer_optimizer_state_to_right_device()
-        callback_list = CallbackList(callbacks)
-        callback_list.append(ProgressionCallback())
-        callback_list.append(WBLoggingCallback(metrics=self.metrics_names, run_name=self.config.get('name')))
-        callback_list.set_model_pytoune(self)
-        callback_list.set_params({'epochs': epochs, 'steps': steps_per_epoch})
+        validation_steps = None if valid_generator is None else len(valid_generator)
+        test_steps = None if test_generator is None else len(test_generator)
 
         self.stop_training = False
 
         callback_list.on_train_begin({})
         for epoch in range(1, epochs + 1):
+            self._reset_train_variables()
             callback_list.on_epoch_begin(epoch, {})
             epoch_begin_time = timeit.default_timer()
 
-            # training
-            train_step_iterator = StepIterator(train_generator, steps_per_epoch, callback_list, self.metrics_names,
-                                               self.nummodalities)
             self.model.train(True)
-            with torch.enable_grad():
-                for step, (x, y) in train_step_iterator:
-                    step['size'] = self._get_batch_size(x, y)
-                    x = [tensor.to(device) for tensor in x]
-                    y = y.to(device)
+            for step_index, (indices, x, y) in enumerate(train_generator):
 
-                    self.optimizer.zero_grad()
-                    loss_tensor, info = self._compute_loss_and_metrics(x, y)
+                batch_begin_time = timeit.default_timer()
+                batch_ind = step_index + 1
 
-                    loss_tensor.backward()
-                    callback_list.on_backward_end(step['number'])
-                    self.optimizer.step()
+                callback_list.on_batch_begin(batch_ind, {})
+                callback_list.on_forward_begin(batch_ind, (indices, x, y))
 
-                    loss = loss_tensor.item()
-                    step.update(info)
-                    step['loss'] = loss
-                    if math.isnan(step['loss']):
-                        self.stop_training = True
+                step = {'number': batch_ind, 'indices': indices, 'size': self._get_batch_size(x, y)}
+
+                x = [tensor.to(self.device) for tensor in x]
+                y = y.to(self.device)
+
+                self.optimizer.zero_grad()
+                pred_y_eval, pred_y, scales, squeezed_mps = self.model(*x, curation_mode=self.curation_mode,
+                                                                       caring_modality=self.caring_modality)
+                loss_tensor = self.loss_function(pred_y, y)
+
+                with torch.no_grad():
+                    step['metrics'] = self._compute_metrics(y, pred_y_eval)
+                    step['modalitywise_metrics'] = self._compute_metrics_multiple_inputs(y, pred_y)
+
+                loss_tensor.backward()
+                callback_list.on_backward_end(step['number'])
+
+                self.optimizer.step()
+
+                loss = loss_tensor.item()
+                step['loss'] = loss
+                if math.isnan(step['loss']):
+                    self.stop_training = True
+
+                self.losses_sum += step['loss'] * step['size']
+                self.metrics_sum += step['metrics'] * step['size']
+                self.metrics_permodal_sum += step['modalitywise_metrics'] * step['size']
+                self.sizes_sum += step['size']
+                self.indices_list.append(indices)
+
+                metrics_dict = dict(zip(self.metrics_names, step['metrics']))
+                for i in range(self.nummodalities):
+                    names = [f'{x}_{"sar" if i == 0 else "opt"}' for x in self.metrics_names]
+                    metrics_dict.update(dict(zip(names, step['modalitywise_metrics'][i])))
+
+                for key, value in step.items():
+                    if key not in self.defaultfields:
+                        if key in self.extra_lists:
+                            self.extra_lists[key].append(value)
+                        else:
+                            self.extra_lists[key] = [value]
+
+                batch_total_time = timeit.default_timer() - batch_begin_time
+                batch_logs = {'batch': batch_ind, 'size': step['size'], 'time': batch_total_time,
+                              'batch_begin_time': batch_begin_time, 'loss': step['loss'], **metrics_dict}
+
+                callback_list.on_batch_end(batch_ind, batch_logs)
 
             train_dict = {
-                'loss': train_step_iterator.loss,
-                'train_indices': train_step_iterator.indices,
-                **{f'train_{k}': v for k, v in train_step_iterator.extra_lists.items()},
-                **train_step_iterator.metrics
+                'loss': self._get_loss(self.sizes_sum, self.losses_sum),
+                'train_indices': self._get_indices(self.sizes_sum, self.indices_list),
+                **{f'train_{k}': v for k, v in self.extra_lists.items()},
+                **self._get_metrics(self.sizes_sum, self.metrics_sum, self.metrics_permodal_sum)
             }
 
-            # validation
-            val_dict = self._eval_generator(valid_generator, 'val', steps=validation_steps)
-            # test
-            test_dict = self._eval_generator(test_generator, 'test', steps=test_steps)
+            # evaluation on validation and test set
+            val_dict = self._training_model_evaluation(valid_generator, 'val', steps=validation_steps)
+            test_dict = self._training_model_evaluation(test_generator, 'test', steps=test_steps)
 
             epoch_log = {
                 'epoch': epoch,
@@ -201,36 +149,110 @@ class Model_:
 
         callback_list.on_train_end({})
 
-    def _compute_loss_and_metrics(self, x, y):
-        x, y = self._process_input(x, y)
-        x = x if isinstance(x, (list, tuple)) else (x, )
+    def _training_model_evaluation(self, eval_generator, phase, *, steps=None) -> dict:
+        self._reset_eval_variables()
 
-        self.minibatch_data = (x, y)
+        if steps is None:
+            steps = len(eval_generator)
 
-        pred_y_eval, pred_y, scales, squeezed_mps = self.model(*x,
-            curation_mode=self.curation_mode, 
-            caring_modality=self.caring_modality)
+        eval_callback = EvalProgressionCallback(phase=phase, steps=steps, metrics_names=self.all_metrics_names)
 
-        loss = self.loss_function(pred_y, y)
-
-        record = {} 
-
+        self.model.eval()
         with torch.no_grad():
-            record['metrics'] = self._compute_metrics(y, pred_y_eval)
-            record['modalitywise_metrics'] = self._compute_metrics_multiple_inputs(y, pred_y)
+            for step_index, (indices, x, y) in enumerate(eval_generator):
 
-        if self.model.module.saving_mmtm_scales:
-            record['mmtmscales_list'] = scales
-        if self.model.module.saving_mmtm_squeeze_array:
-            record['squeezedmaps_array_list'] = squeezed_mps
+                batch_begin_time = timeit.default_timer()
+                batch_ind = step_index + 1
 
-        return loss, record
+                eval_callback.on_batch_begin(batch_ind, {})
 
-    def _process_input(self, *args):
-        args = numpy_to_torch(args)
-        if self.device is not None:
-            args = torch_to(args, self.device)
-        return args[0] if len(args) == 1 else args
+                step = {
+                    'number': batch_ind,
+                    'indices': indices
+                }
+
+                batch_size = self._get_batch_size(x, y)
+                step['size'] = batch_size
+
+                x = [tensor.to(self.device) for tensor in x]
+                y = y.to(self.device)
+
+                pred_y_eval, pred_y, *_ = self.model(*x)
+                loss_tensor = self.loss_function(pred_y, y)
+
+                with torch.no_grad():
+                    step['metrics'] = self._compute_metrics(y, pred_y_eval)
+                    step['modalitywise_metrics'] = self._compute_metrics_multiple_inputs(y, pred_y)
+
+                step['loss'] = float(loss_tensor.item())
+
+                self.eval_losses_sum += step['loss'] * batch_size
+                self.eval_metrics_sum += step['metrics'] * batch_size
+                self.eval_metrics_permodal_sum += step['modalitywise_metrics'] * batch_size
+                self.eval_sizes_sum += step['size']
+                self.eval_indices_list.append(indices)
+
+                metrics_dict = dict(zip(self.metrics_names, step['metrics']))
+
+                for i in range(self.nummodalities):
+                    names = [f'{x}_{"sar" if i == 0 else "opt"}' for x in self.metrics_names]
+                    metrics_dict.update(dict(zip(names, step['modalitywise_metrics'][i])))
+
+                batch_total_time = timeit.default_timer() - batch_begin_time
+
+                batch_logs = {'batch': batch_ind, 'size': step['size'], 'time': batch_total_time,
+                              'batch_begin_time': batch_begin_time, 'loss': step['loss'], **metrics_dict}
+                eval_callback.on_batch_end(batch_ind, batch_logs)
+
+        info_dict = {
+            f'{phase}_loss': self._get_loss(self.eval_sizes_sum, self.eval_losses_sum),
+            f'{phase}_indices': self._get_indices(self.eval_sizes_sum, self.eval_indices_list),
+            **self._get_metrics(self.eval_sizes_sum, self.eval_metrics_sum, self.eval_metrics_permodal_sum, phase)
+        }
+
+        return info_dict
+
+    @staticmethod
+    def _get_loss(sizes_sum, losses_sum):
+        if sizes_sum == 0:
+            return 0
+        else:
+            return losses_sum / sizes_sum
+
+    def _get_metrics(self, sizes_sum, metrics_sum, metrics_permodal_sum, phase=None):
+        if sizes_sum == 0:
+            metrics_dict = dict(zip([f'{phase}_{m}' for m in self.metrics_names], np.zeros(len(self.metrics_names))))
+        else:
+            metrics_dict = dict(zip([f'{phase}_{m}' for m in self.metrics_names], metrics_sum / sizes_sum))
+            for i in range(self.nummodalities):
+                names = [f'{phase}_{x}_{"sar" if i == 0 else "opt"}' for x in self.metrics_names]
+                metrics_dict.update(dict(zip(names, metrics_permodal_sum[i] / sizes_sum)))
+        return metrics_dict
+
+    @staticmethod
+    def _get_indices(sizes_sum, indices_list):
+        if sizes_sum == 0:
+            return []
+        elif indices_list[0] is None:
+            return []
+        else:
+            return np.concatenate(indices_list, axis=0)
+
+    def _reset_eval_variables(self):
+        self.eval_losses_sum = 0.
+        self.eval_metrics_sum = np.zeros(len(self.metrics))
+        self.eval_metrics_permodal_sum = np.zeros((self.nummodalities, len(self.metrics)))
+        self.eval_sizes_sum = 0.
+        self.eval_extra_lists = {}
+        self.eval_indices_list = []
+
+    def _reset_train_variables(self):
+        self.losses_sum = 0.
+        self.metrics_sum = np.zeros(len(self.metrics))
+        self.metrics_permodal_sum = np.zeros((self.nummodalities, len(self.metrics)))
+        self.sizes_sum = 0.
+        self.extra_lists = {}
+        self.indices_list = []
 
     def _compute_metrics(self, y, pred_y):
         return np.array([float(metric(y, pred_y)) for metric in self.metrics])
@@ -244,75 +266,3 @@ class Model_:
         if torch.is_tensor(y) or isinstance(y, np.ndarray):
             return len(y)
         return 1
-
-    def _transfer_optimizer_state_to_right_device(self):
-        # Since the optimizer state is loaded on CPU, it will crashed when the
-        # optimizer will receive gradient for parameters not on CPU. Thus, for
-        # each parameter, we transfer its state in the optimizer on the same
-        # device as the parameter itself just before starting the optimization.
-        for group in self.optimizer.param_groups:
-            for p in group['params']:
-                if p in self.optimizer.state:
-                    for _, v in self.optimizer.state[p].items():
-                        if torch.is_tensor(v) and p.device != v.device:
-                            v.data = v.data.to(p.device)
-
-    def to(self, device):
-        self.device = device
-        self.model.to(self.device)
-        if isinstance(self.loss_function, torch.nn.Module):
-            self.loss_function.to(self.device)
-
-        for metric in self.metrics:
-            if isinstance(metric, torch.nn.Module):
-                metric.to(self.device)
-
-        return self
-
-    def _eval_generator(self, generator, phase, *, steps=None):
-        if steps is None:
-            steps = len(generator)
-
-        eval_callback = EvalProgressionCallback(phase=phase, steps=steps, metrics_names=['loss'] + self.metrics_names)
-        step_iterator = StepIterator(generator, steps, eval_callback, self.metrics_names, self.nummodalities)
-
-        self.model.eval()
-        with torch.no_grad():
-            for step, (x, y) in step_iterator:
-                step['size'] = self._get_batch_size(x, y)
-                loss_tensor, info = self._compute_loss_and_metrics(x, y)
-                step['loss'] = float(loss_tensor)
-                step.update(info)
-
-        metrics_dict = {
-            f'{phase}_{metric_name}': metric for metric_name, metric in step_iterator.metrics.items()
-        }
-
-        info_dict = {
-            f'{phase}_loss' : step_iterator.loss,
-            f'{phase}_indices': step_iterator.indices,
-            **{f'{phase}_{k}': v for k, v in step_iterator.extra_lists.items()},
-            **metrics_dict
-        }
-
-        return info_dict
-
-    def eval_loop(self, test_generator, *,  test_steps=None, epochs=1, callbacks=[]):
-        callback_list = CallbackList(callbacks)
-        callback_list.set_model_pytoune(self)
-        callback_list.on_train_begin({})
-        epoch = 0
-        while epoch <= epochs:
-            epoch_begin_time = timeit.default_timer()
-            callback_list.on_epoch_begin(epoch, {})
-            test_dict = self._eval_generator(test_generator, 'test', steps=test_steps)
-
-            test_dict['epoch'] = epoch
-            test_dict['time'] = timeit.default_timer() - epoch_begin_time
-            test_dict['epoch_begin_time'] = epoch_begin_time
-
-            callback_list.on_epoch_end(epoch, test_dict)
-            
-            epoch += 1
-
-

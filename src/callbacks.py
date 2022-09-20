@@ -166,33 +166,31 @@ class Callback(object):
 
 @gin.configurable
 class BiasMitigationStrong(Callback):
-    def __init__(self, 
-                 epsilon,
-                 curation_windowsize,
-                 branchnames,
-                 starting_epoch=2,
-                 MMTMnames = ['sar', 'opt']
-                 ):
+    def __init__(self, epsilon, curation_windowsize, branchnames, starting_epoch=2):
+        super(BiasMitigationStrong, self).__init__()
         self.epsilon = epsilon
         self.branchnames = branchnames
-        self.MMTMnames = MMTMnames
         self.curation_windowsize = curation_windowsize
         self.starting_epoch = starting_epoch
 
-        super(BiasMitigationStrong, self).__init__()
-    
-    def on_train_begin(self, logs):
-        self.M_bypass_modal_0 = 0
-        self.M_bypass_modal_1 = 0
-        self.M_main_modal_0 = 0
-        self.M_main_modal_1 = 0
-        self.model_pytoune.curation_mode = False 
-        self.model_pytoune.caring_modality = None
-        self.unlock=False
+        self.M_params_sar_fusion, self.M_params_opt_fusion = None, None
+        self.M_params_sar_branch, self.M_params_opt_branch = None, None
+        self.model_pytoune = None
+        self.model_pytoune = None
+        self.unlock = None
+        self.d_speed, self.cls_sar, self.cls_opt = None, None, None
+        self.curation_step = None
 
-    def compute_BDR(self):
-        wn_main, wn_bypass = [0]*len(self.branchnames), [0]*len(self.branchnames)
-        gn_main, gn_bypass = [0]*len(self.branchnames), [0]*len(self.branchnames)
+    def on_train_begin(self, logs):
+        self.M_params_sar_fusion, self.M_params_opt_fusion = 0, 0
+        self.M_params_sar_branch, self.M_params_opt_branch = 0, 0
+        self.model_pytoune.curation_mode = False
+        self.model_pytoune.caring_modality = None
+        self.unlock = False
+
+    def compute_d_speed(self):
+        wn_branches, wn_fusion_modules = [0]*len(self.branchnames), [0]*len(self.branchnames)
+        gn_branches, gn_fusion_modules = [0]*len(self.branchnames), [0]*len(self.branchnames)
 
         for name, parameter in self.model.named_parameters():
             wn = (parameter ** 2).sum().item()
@@ -200,49 +198,52 @@ class BiasMitigationStrong(Callback):
 
             if 'mmtm' in name:
                 shared = True
-                for ind, modal in enumerate(self.MMTMnames):
+                for ind, modal in enumerate(self.branchnames):
                     if modal in name: 
-                        wn_bypass[ind] += wn
-                        gn_bypass[ind] += gn
+                        wn_fusion_modules[ind] += wn
+                        gn_fusion_modules[ind] += gn
                         shared = False
                 if shared:
-                    for ind, modal in enumerate(self.MMTMnames):
-                        wn_bypass[ind] += wn
-                        gn_bypass[ind] += gn
+                    for ind, modal in enumerate(self.branchnames):
+                        wn_fusion_modules[ind] += wn
+                        gn_fusion_modules[ind] += gn
 
             else:
                 for ind, modal in enumerate(self.branchnames):
                     if modal in name: 
-                        wn_main[ind] += wn
-                        gn_main[ind] += gn
+                        wn_branches[ind] += wn
+                        gn_branches[ind] += gn
 
-        self.M_bypass_modal_0 += gn_bypass[0]/wn_bypass[0]
-        self.M_bypass_modal_1 += gn_bypass[1]/wn_bypass[1]
-        self.M_main_modal_0 += gn_main[0]/wn_main[0]
-        self.M_main_modal_1 += gn_main[1]/wn_main[1]
+        self.M_params_sar_fusion += gn_fusion_modules[0] / wn_fusion_modules[0]
+        self.M_params_opt_fusion += gn_fusion_modules[1] / wn_fusion_modules[1]
+        self.M_params_sar_branch += gn_branches[0] / wn_branches[0]
+        self.M_params_opt_branch += gn_branches[1] / wn_branches[1]
 
-        BDR_0 = np.log10(self.M_bypass_modal_0/self.M_main_modal_0)
-        BDR_1 = np.log10(self.M_bypass_modal_1/self.M_main_modal_1)
+        cls_opt = np.log10(self.M_params_sar_fusion / self.M_params_sar_branch)
+        cls_sar = np.log10(self.M_params_opt_fusion / self.M_params_opt_branch)
+        d_speed = cls_opt - cls_sar
 
-        return BDR_0 - BDR_1
+        return d_speed, cls_sar, cls_opt
 
     def on_batch_end(self, batch, logs):
         logs['curation_mode'] = float(self.model_pytoune.curation_mode)
-        logs['caring_modality'] = self.model_pytoune.caring_modality 
-        logs['d_BDR'] = self.d_BDR
+        logs['caring_modality'] = self.model_pytoune.caring_modality
+        logs['d_speed'] = self.d_speed
+        logs['cls_sar'] = self.cls_sar
+        logs['cls_opt'] = self.cls_opt
 
     def on_backward_end(self, batch):
         if self.unlock:
             if not self.model_pytoune.curation_mode:
-                self.d_BDR = self.compute_BDR()
-                if abs(self.d_BDR) > self.epsilon:
-                    biased_direction = np.sign(self.d_BDR)
+                self.d_speed, self.cls_sar, self.cls_opt = self.compute_d_speed()
+                if abs(self.d_speed) > self.epsilon:
+                    biased_direction = np.sign(self.d_speed)
                     self.model_pytoune.curation_mode = True
                     self.curation_step = 0
 
-                    if biased_direction == -1:  # BDR0 < BDR1
+                    if biased_direction == -1:  # cls opt < cls sar
                         self.model_pytoune.caring_modality = 1
-                    elif biased_direction == 1:  # BDR0 > BDR1
+                    elif biased_direction == 1:  # cls opt > cls sar
                         self.model_pytoune.caring_modality = 0 
                 else:
                     self.model_pytoune.curation_mode = False 
@@ -250,51 +251,15 @@ class BiasMitigationStrong(Callback):
             else:
                 self.curation_step += 1
                 if self.curation_step == self.curation_windowsize:
-                    self.model_pytoune.curation_mode=False
+                    self.model_pytoune.curation_mode = False
         else:
-            self.d_BDR = self.compute_BDR()
+            self.d_speed, self.cls_sar, self.cls_opt = self.compute_d_speed()
             self.model_pytoune.curation_mode = False 
             self.model_pytoune.caring_modality = 0 
 
     def on_epoch_begin(self, epoch, logs):
         if epoch >= self.starting_epoch:
             self.unlock = True
-
-
-@gin.configurable
-class BiasMitigationRandom(Callback):
-
-    def on_train_begin(self, logs):
-        self.model_pytoune.curation_mode = False 
-        self.model_pytoune.caring_modality = None
-        self.unlock = False
-        self.starting_epoch = 2
-
-    def on_batch_end(self, batch, logs):
-        logs['curation_mode'] = float(self.model_pytoune.curation_mode)
-        logs['caring_modality'] = self.model_pytoune.caring_modality 
-
-    def on_backward_end(self, batch):
-        if self.unlock:
-            
-            mode=random.choice([0, 1, 2])
-            if mode == 0:
-                self.model_pytoune.curation_mode = False 
-                self.model_pytoune.caring_modality = 0
-            elif mode == 1:
-                self.model_pytoune.curation_mode = True
-                self.model_pytoune.caring_modality = 1
-            else:
-                self.model_pytoune.curation_mode = True
-                self.model_pytoune.caring_modality = 0
-  
-        else:
-            self.model_pytoune.curation_mode = False 
-            self.model_pytoune.caring_modality = 0 
-
-    def on_epoch_begin(self, epoch, logs):
-        if epoch >= self.starting_epoch:
-            self.unlock=True
 
 
 @gin.configurable
