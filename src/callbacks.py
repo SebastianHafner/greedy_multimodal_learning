@@ -198,29 +198,33 @@ class BiasMitigationStrong(Callback):
 
             if 'mmtm' in name:
                 shared = True
-                for ind, modal in enumerate(self.branchnames):
+                for i, modal in enumerate(self.branchnames):
                     if modal in name: 
-                        wn_fusion_modules[ind] += wn
-                        gn_fusion_modules[ind] += gn
+                        wn_fusion_modules[i] += wn
+                        gn_fusion_modules[i] += gn
                         shared = False
                 if shared:
-                    for ind, modal in enumerate(self.branchnames):
-                        wn_fusion_modules[ind] += wn
-                        gn_fusion_modules[ind] += gn
+                    for i, modal in enumerate(self.branchnames):
+                        wn_fusion_modules[i] += wn
+                        gn_fusion_modules[i] += gn
 
             else:
-                for ind, modal in enumerate(self.branchnames):
+                for i, modal in enumerate(self.branchnames):
                     if modal in name: 
-                        wn_branches[ind] += wn
-                        gn_branches[ind] += gn
+                        wn_branches[i] += wn
+                        gn_branches[i] += gn
 
         self.M_params_sar_fusion += gn_fusion_modules[0] / wn_fusion_modules[0]
         self.M_params_opt_fusion += gn_fusion_modules[1] / wn_fusion_modules[1]
         self.M_params_sar_branch += gn_branches[0] / wn_branches[0]
         self.M_params_opt_branch += gn_branches[1] / wn_branches[1]
 
+        # s(opt|sar): how fast the model learns from optical relative to sar
         cls_opt = np.log10(self.M_params_sar_fusion / self.M_params_sar_branch)
+
+        # s(sar|opt): how fast the model learns from sar relative to optical
         cls_sar = np.log10(self.M_params_opt_fusion / self.M_params_opt_branch)
+
         d_speed = cls_opt - cls_sar
 
         return d_speed, cls_sar, cls_opt
@@ -499,14 +503,13 @@ class ProgressionCallback(Callback):
             self.last_step = batch
 
     def _get_metrics_string(self, logs):
-        train_metrics_str_gen = ('{}: {:f}'.format(k, logs[k]) for k in self.metrics if logs.get(k) is not None)
-        val_metrics_str_gen = ('{}: {:f}'.format('val_' + k, logs['val_' + k]) for k in self.metrics
-                               if logs.get('val_' + k) is not None)
+        train_metrics_str_gen = (f'{k}: {logs[k]:.3f}' for k in self.metrics if logs.get(k) is not None)
+        val_metrics_str_gen = (f'{k}: {logs["val_" + k]:.3f}' for k in self.metrics if logs.get('val_' + k) is not None)
         return ', '.join(itertools.chain(train_metrics_str_gen, val_metrics_str_gen))
 
     def _get_iol_string(self, logs):
-        str_gen = ['{}: {:f}'.format(k, logs[k]) for k in self.other_metrics if logs.get(k) is not None]
-        return  ', '.join(str_gen)
+        str_gen = [f'{k}: {logs[k]:.3f}' for k in self.other_metrics if logs.get(k) is not None]
+        return ', '.join(str_gen)
 
 
 class EvalProgressionCallback(Callback):

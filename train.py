@@ -18,9 +18,14 @@ logger = logging.getLogger(__name__)
 
 
 @gin.configurable
-def train(config, dataset_path, save_path, lr, wd, batch_size, n_epochs, nummodalities, other_callbacks: list):
+def train(config, dataset_path, save_path, lr, wd, batch_size, n_epochs, nummodalities, seed, other_callbacks: list):
 
     _CONFIG['name'] = config
+
+    # make training deterministic
+    torch.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
     model = MMTM_DSUNet()
     model = torch.nn.DataParallel(model)
@@ -43,7 +48,7 @@ def train(config, dataset_path, save_path, lr, wd, batch_size, n_epochs, nummoda
         device=device,
     )
 
-    train, valid, test = dataset.get_urbanmappingdata(dataset_path, batch_size=batch_size)
+    train, valid, test = dataset.get_urbanmappingdata(dataset_path, batch_size=batch_size, seed=seed)
 
     callbacks = []
     for name in other_callbacks:
@@ -68,7 +73,7 @@ def train(config, dataset_path, save_path, lr, wd, batch_size, n_epochs, nummoda
     callback_list.set_params({'epochs': n_epochs, 'steps': len(train)})
 
     _ = framework.train_loop(train, valid_generator=valid, test_generator=test, epochs=n_epochs,
-                         callback_list=callback_list)
+                             callback_list=callback_list)
 
 
 if __name__ == "__main__":

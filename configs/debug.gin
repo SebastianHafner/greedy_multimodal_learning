@@ -1,10 +1,11 @@
 # Train configuration
+train.seed=1
 train.batch_size=4
 train.lr=0.0001
 train.wd=0.01
 train.n_epochs=100
 train.nummodalities=2
-train.other_callbacks=['EarlyStopping', 'BiasMitigationStrong']
+train.other_callbacks=['BiasMitigationStrong']
 
 ModelCheckpoint.monitor='val_f1'
 
@@ -25,7 +26,6 @@ WBLoggingCallback.other_metrics=['d_speed', 'cls_sar', 'cls_opt', 'curation_mode
 
 
 # Dataset
-get_urbanmappingdata.seed=1
 get_urbanmappingdata.num_workers=0
 get_urbanmappingdata.train_sites=['montreal']
 get_urbanmappingdata.val_sites=['calgary']

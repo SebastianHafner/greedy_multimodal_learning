@@ -198,6 +198,7 @@ class MMTM(nn.Module):
         sar_out = self.sigmoid(sar_out)
         opt_out = self.sigmoid(opt_out)
 
+        # running average weights of output
         self.running_avg_weight_sar = (sar_out.mean(0) + self.running_avg_weight_sar * self.step).detach() / (
                 self.step + 1)
         self.running_avg_weight_opt = (opt_out.mean(0) + self.running_avg_weight_opt * self.step).detach() / (
@@ -205,95 +206,23 @@ class MMTM(nn.Module):
 
         self.step += 1
 
-        if return_scale:
-            scales = [sar_out.cpu(), opt_out.cpu()]
-        else:
-            scales = None
+        scales = [sar_out.cpu(), opt_out.cpu()] if return_scale else None
+        squeeze_array = [x.cpu() for x in squeeze_array] if return_squeezed_mps else None
 
-        if return_squeezed_mps:
-            squeeze_array = [x.cpu() for x in squeeze_array]
-        else:
-            squeeze_array = None
-
-        if not curation_mode:
-            dim_diff = len(sar.shape) - len(sar_out.shape)
-            sar_out = sar_out.view(sar_out.shape + (1,) * dim_diff)
-
-            dim_diff = len(opt.shape) - len(opt_out.shape)
-            opt_out = opt_out.view(opt_out.shape + (1,) * dim_diff)
-
-        else:
+        if curation_mode:
+            # for re-balancing steps, either one of the excitation signals is replaced with its respective avg weight
             if caring_modality == 0:
-                dim_diff = len(opt.shape) - len(opt_out.shape)
-                opt_out = opt_out.view(opt_out.shape + (1,) * dim_diff)
-
-                dim_diff = len(sar.shape) - len(sar_out.shape)
-                sar_out = torch.stack(sar_out.shape[0] * [
-                    self.running_avg_weight_sar
-                ]).view(sar_out.shape + (1,) * dim_diff)
+                sar_out = torch.stack(sar_out.shape[0] * [self.running_avg_weight_sar])  # (B, C)
 
             elif caring_modality == 1:
-                dim_diff = len(sar.shape) - len(sar_out.shape)
-                sar_out = sar_out.view(sar_out.shape + (1,) * dim_diff)
+                opt_out = torch.stack(opt_out.shape[0] * [self.running_avg_weight_opt])
 
-                dim_diff = len(opt.shape) - len(opt_out.shape)
-                opt_out = torch.stack(opt_out.shape[0] * [
-                    self.running_avg_weight_opt
-                ]).view(opt_out.shape + (1,) * dim_diff)
+        # matching the shape of the excitation signals to the input features for recalibration
+        # (B, C) -> (B, C, H, W)
+        sar_out = sar_out.view(sar_out.shape + (1,) * (len(sar.shape) - len(sar_out.shape)))
+        opt_out = opt_out.view(opt_out.shape + (1,) * (len(opt.shape) - len(opt_out.shape)))
 
         return sar * sar_out, opt * opt_out, scales, squeeze_array
-
-
-def get_mmtm_outputs(eval_save_path, mmtm_recorded, key):
-    with open(os.path.join(eval_save_path, 'history.pickle'), 'rb') as f:
-        his_epo = pickle.load(f)
-
-    print(his_epo.keys())
-    data = []
-    for batch in his_epo[key][0]:
-        assert mmtm_recorded == len(batch)
-
-        for mmtmid in range(len(batch)):
-            if len(data) < mmtmid + 1:
-                data.append({})
-            for i, viewdd in enumerate(batch[mmtmid]):
-                data[mmtmid].setdefault('view_%d' % i, []).append(np.array(viewdd))
-
-    for mmtmid in range(len(data)):
-        for k, v in data[mmtmid].items():
-            data[mmtmid][k] = np.concatenate(data[mmtmid][k])[np.argsort(his_epo['test_indices'][0])]
-
-    return data
-
-
-def get_rescale_weights(eval_save_path,
-                        training_save_path,
-                        key='test_squeezedmaps_array_list',
-                        validation=False,
-                        starting_mmtmindice=1,
-                        mmtmpositions=4,
-                        device=None,
-                        ):
-    data = get_mmtm_outputs(eval_save_path, mmtmpositions - starting_mmtmindice, key)
-
-    with open(os.path.join(training_save_path, 'history.pickle'), 'rb') as f:
-        his_ori = pickle.load(f)
-
-    selected_indices = his_ori['val_indices'][0] if validation else his_ori['train_indices'][0]
-
-    mmtm_weights = []
-    for mmtmid in range(mmtmpositions):
-        if mmtmid < starting_mmtmindice:
-            mmtm_weights.append(None)
-        else:
-            weights = [data[mmtmid - starting_mmtmindice][k][selected_indices].mean(0) \
-                       for k in sorted(data[mmtmid - starting_mmtmindice].keys())]
-            if device is not None:
-                weights = numpy_to_torch(weights)
-                weights = torch_to(weights, device)
-            mmtm_weights.append(weights)
-
-    return mmtm_weights
 
 
 # sub-parts of the U-Net model
