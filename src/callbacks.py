@@ -193,6 +193,9 @@ class BiasMitigationStrong(Callback):
         gn_branches, gn_fusion_modules = [0]*len(self.branchnames), [0]*len(self.branchnames)
 
         for name, parameter in self.model.named_parameters():
+            if 'ravg_squeeze' in name:
+                continue
+
             wn = (parameter ** 2).sum().item()
             gn = (parameter.grad.data ** 2).sum().item()  # (grad ** 2).sum().item()
 

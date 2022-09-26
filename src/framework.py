@@ -82,8 +82,8 @@ class Framework:
                 y = y.to(self.device)
 
                 self.optimizer.zero_grad()
-                pred_y_eval, pred_y, scales, squeezed_mps = self.model(*x, curation_mode=self.curation_mode,
-                                                                       caring_modality=self.caring_modality)
+                pred_y_eval, pred_y = self.model(*x, curation_mode=self.curation_mode,
+                                                 caring_modality=self.caring_modality)
                 loss_tensor = self.loss_function(pred_y, y)
 
                 with torch.no_grad():
