@@ -184,10 +184,10 @@ class MMTM(nn.Module):
         if curation_mode:
             # for re-balancing steps, either one of the excitation signals is replaced with its respective avg weight
             if caring_modality == 0:
-                sar_out = torch.stack(sar_out.shape[0] * [self.ravg_weight_sar])  # (B, C)
+                sar_out = torch.stack(sar_out.shape[0] * [self.ravg_out_sar])  # (B, C)
 
             elif caring_modality == 1:
-                opt_out = torch.stack(opt_out.shape[0] * [self.ravg_weight_opt])
+                opt_out = torch.stack(opt_out.shape[0] * [self.ravg_out_opt])
 
         # matching the shape of the excitation signals to the input features for recalibration
         # (B, C) -> (B, C, H, W)
