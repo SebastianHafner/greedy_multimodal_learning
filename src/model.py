@@ -6,10 +6,8 @@ import gin
 
 @gin.configurable
 class MMTM_DSUNet(nn.Module):
-    def __init__(self, mmtm_off=False, device='cuda'):
+    def __init__(self, device='cuda'):
         super(MMTM_DSUNet, self).__init__()
-
-        self.mmtm_off = mmtm_off
 
         self.inc_sar = InConv(2, 64, DoubleConv)
         self.inc_opt = InConv(4, 64, DoubleConv)
@@ -49,10 +47,12 @@ class MMTM_DSUNet(nn.Module):
         self.outc_sar = OutConv(64, 1)
         self.outc_opt = OutConv(64, 1)
 
-    def forward(self, x_sar, x_opt, curation_mode=False, caring_modality=None, rec_mmtm_squeeze=False):
+        self.mmtm_units = [self.mmtm1, self.mmtm2, self.mmtm3, self.mmtm4]
+
+    def forward(self, x_sar, x_opt, curation_mode=False, caring_modality=None, rec_mmtm_squeeze=False, mmtm_off=False):
 
         mmtm_kwargs = {
-            'turnoff_cross_modal_flow': True if self.mmtm_off else False,
+            'turnoff_cross_modal_flow': True if mmtm_off else False,
             'curation_mode': curation_mode,
             'caring_modality': caring_modality,
             'rec_mmtm_squeeze': rec_mmtm_squeeze,
@@ -110,6 +110,9 @@ class MMTM_DSUNet(nn.Module):
 
         return (out_sar + out_opt) / 2, [out_sar, out_opt]
 
+    def mmtm_squeeze_features_recorded(self):
+        return torch.all(torch.tensor([mmtm.avg_squeeze_recorded() for mmtm in self.mmtm_units]))
+
 
 @gin.configurable
 class MMTM(nn.Module):
@@ -137,41 +140,35 @@ class MMTM(nn.Module):
     def forward(self, sar, opt, turnoff_cross_modal_flow=False, curation_mode=False, caring_modality=0,
                 rec_mmtm_squeeze=False):
 
+        tview_sar = sar.view(sar.shape[:2] + (-1,))
+        squeeze_sar = torch.mean(tview_sar, dim=-1)
+
+        tview_opt = opt.view(opt.shape[:2] + (-1,))
+        squeeze_opt = torch.mean(tview_opt, dim=-1)
+
+        if rec_mmtm_squeeze:
+            ravg_squeeze_sar = (squeeze_sar.mean(0) + self.ravg_squeeze_sar * self.rec_step) / (self.rec_step + 1)
+            self.ravg_squeeze_sar = nn.Parameter(ravg_squeeze_sar.detach())
+            ravg_squeeze_opt = (squeeze_opt.mean(0) + self.ravg_squeeze_opt * self.rec_step) / (self.rec_step + 1)
+            self.ravg_squeeze_opt = nn.Parameter(ravg_squeeze_opt.detach())
+            self.rec_step += 1
+
         if not turnoff_cross_modal_flow:
-            tview_sar = sar.view(sar.shape[:2] + (-1,))
-            squeeze_sar = torch.mean(tview_sar, dim=-1)
-
-            tview_opt = opt.view(opt.shape[:2] + (-1,))
-            squeeze_opt = torch.mean(tview_opt, dim=-1)
-
-            if rec_mmtm_squeeze:
-                self.ravg_squeeze_sar = (squeeze_sar.mean(0) + self.ravg_sqeeze_sar * self.rec_step).detach()\
-                                        / (self.rec_step + 1)
-                self.ravg_squeeze_opt = (squeeze_opt.mean(0) + self.ravg_sqeeze_opt * self.rec_step).detach()\
-                                        / (self.rec_step + 1)
-                self.rec_step += 1
-
             squeeze = torch.cat((squeeze_sar, squeeze_opt), 1)
             excitation = self.fc_squeeze(squeeze)
             excitation = self.relu(excitation)
-
             sar_out = self.fc_sar(excitation)
             opt_out = self.fc_opt(excitation)
-
         else:
-            tview = sar.view(sar.shape[:2] + (-1,))
-            squeeze = torch.cat([torch.mean(tview, dim=-1),
-                                 torch.stack(sar.shape[0] * [self.running_avg_squeeze_opt])], 1)
-            excitation = self.relu(self.fc_squeeze(squeeze))
+            ravg_squeeze_opt = self.ravg_squeeze_opt.expand(sar.shape[0], -1)
+            squeeze_unimodal_sar = torch.cat([squeeze_sar, ravg_squeeze_opt], 1)
+            excitation_unimodal_sar = self.relu(self.fc_squeeze(squeeze_unimodal_sar))
+            sar_out = self.fc_sar(excitation_unimodal_sar)
 
-            sar_out = self.fc_sar(excitation)
-
-            tview = opt.view(opt.shape[:2] + (-1,))
-            squeeze = torch.cat([torch.stack(opt.shape[0] * [self.running_avg_squeeze_sar]),
-                                 torch.mean(tview, dim=-1)], 1)
-            excitation = self.relu(self.fc_squeeze(squeeze))
-
-            opt_out = self.fc_opt(excitation)
+            ravg_squeeze_sar = self.ravg_squeeze_sar.expand(opt.shape[0], -1)
+            squeeze_unimodal_opt = torch.cat([ravg_squeeze_sar, squeeze_opt], 1)
+            excitation_unimodal_opt = self.relu(self.fc_squeeze(squeeze_unimodal_opt))
+            opt_out = self.fc_sar(excitation_unimodal_opt)
 
         sar_out = self.sigmoid(sar_out)
         opt_out = self.sigmoid(opt_out)
@@ -195,6 +192,12 @@ class MMTM(nn.Module):
         opt_out = opt_out.view(opt_out.shape + (1,) * (len(opt.shape) - len(opt_out.shape)))
 
         return sar * sar_out, opt * opt_out
+
+    def avg_squeeze_recorded(self):
+        if torch.sum(self.ravg_squeeze_sar) + torch.sum(self.ravg_squeeze_opt) == 0:
+            return False
+        else:
+            return True
 
 
 # sub-parts of the U-Net model

@@ -516,7 +516,7 @@ class ProgressionCallback(Callback):
 
 
 class EvalProgressionCallback(Callback):
-    def __init__(self, phase, metrics_names, steps=None):
+    def __init__(self, phase, metrics_names=None, steps=None):
         self.params = {}
         self.params['steps'] = steps
         self.params['phase'] = phase 
@@ -525,6 +525,8 @@ class EvalProgressionCallback(Callback):
         super(EvalProgressionCallback, self).__init__()
 
     def _get_metrics_string(self, logs):
+        if self.metrics is None:
+            return ''
         metrics_str_gen = ('{}: {:f}'.format(self.params['phase'] + '_' + k, logs[k]) for k in self.metrics
                                if logs.get(k) is not None)
         return ', '.join(metrics_str_gen)

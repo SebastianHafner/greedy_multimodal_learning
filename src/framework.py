@@ -177,12 +177,11 @@ class Framework:
                 x = [tensor.to(self.device) for tensor in x]
                 y = y.to(self.device)
 
-                pred_y_eval, pred_y, *_ = self.model(*x)
+                pred_y_eval, pred_y = self.model(*x)
                 loss_tensor = self.loss_function(pred_y, y)
 
-                with torch.no_grad():
-                    step['metrics'] = self._compute_metrics(y, pred_y_eval)
-                    step['modalitywise_metrics'] = self._compute_metrics_multiple_inputs(y, pred_y)
+                step['metrics'] = self._compute_metrics(y, pred_y_eval)
+                step['modalitywise_metrics'] = self._compute_metrics_multiple_inputs(y, pred_y)
 
                 step['loss'] = float(loss_tensor.item())
 
@@ -211,6 +210,130 @@ class Framework:
         }
 
         return info_dict
+
+    def record_mmtm_features(self, generator, callback_list, epochs: int = 1):
+        callback_list.set_model_pytoune(self)
+        callback_list.on_train_begin({})
+        epoch = 0
+        self.model.eval()
+        with torch.no_grad():
+            while epoch < epochs:
+                epoch_begin_time = timeit.default_timer()
+                callback_list.on_epoch_begin(epoch, {})
+
+                for step_index, (indices, x, y) in enumerate(generator):
+                    batch_begin_time = timeit.default_timer()
+                    batch_ind = step_index + 1
+
+                    callback_list.on_batch_begin(batch_ind, {})
+
+                    step = {
+                        'number': batch_ind,
+                        'indices': indices
+                    }
+
+                    batch_size = self._get_batch_size(x, y)
+                    step['size'] = batch_size
+
+                    x = [tensor.to(self.device) for tensor in x]
+                    _ = self.model(*x, rec_mmtm_squeeze=True)
+
+                    batch_total_time = timeit.default_timer() - batch_begin_time
+
+                    batch_logs = {'batch': batch_ind, 'size': step['size'], 'time': batch_total_time,
+                                  'batch_begin_time': batch_begin_time}
+                    callback_list.on_batch_end(batch_ind, batch_logs)
+
+                step['epoch'] = epoch
+                step['time'] = timeit.default_timer() - epoch_begin_time
+                step['epoch_begin_time'] = epoch_begin_time
+                callback_list.on_epoch_end(epoch, step)
+                epoch += 1
+        return self.model
+
+    def eval_loop(self, eval_generator, phase, *, steps=None) -> dict:
+        self._reset_eval_variables()
+
+        if steps is None:
+            steps = len(eval_generator)
+
+        eval_callback = EvalProgressionCallback(phase=phase, steps=steps, metrics_names=self.all_metrics_names)
+
+        metrics_dict = dict(zip(self.metrics_names, len(self.metrics_names) * [0]))
+        for i in range(self.nummodalities):
+            names = [f'{x}_{"sar" if i == 0 else "opt"}' for x in self.metrics_names]
+            metrics_dict.update(dict(zip(names, len(names) * [0])))
+        unimodal_names = [f'{key}_unimodal' for key in metrics_dict.keys()]
+        metrics_dict.update(dict(zip(unimodal_names, len(unimodal_names) * [0])))
+
+        self.model.eval()
+        with torch.no_grad():
+            for step_index, (indices, x, y) in enumerate(eval_generator):
+
+                batch_begin_time = timeit.default_timer()
+                batch_ind = step_index + 1
+
+                eval_callback.on_batch_begin(batch_ind, {})
+
+                step = {
+                    'number': batch_ind,
+                    'indices': indices
+                }
+
+                batch_size = self._get_batch_size(x, y)
+                step['size'] = batch_size
+
+                x = [tensor.to(self.device) for tensor in x]
+                y = y.to(self.device)
+
+                # with crossmodal flow
+                pred_y_eval, pred_y = self.model(*x)
+
+                metrics = self._compute_metrics(y, pred_y_eval)
+                for metrics_name, value in zip(self.metrics_names, metrics):
+                    metrics_dict[metrics_name] += value
+
+                modalitywise_metrics = self._compute_metrics_multiple_inputs(y, pred_y)
+                for i in range(self.nummodalities):
+                    names = [f'{x}_{"sar" if i == 0 else "opt"}' for x in self.metrics_names]
+                    for metrics_name, value in zip(names, modalitywise_metrics[i]):
+                        metrics_dict[metrics_name] += value
+
+                # without crossmodal flow
+                pred_y_eval_unimodal, pred_y_unimodal = self.model(*x, mmtm_off=True)
+                metrics = self._compute_metrics(y, pred_y_eval_unimodal)
+                for metrics_name, value in zip(self.metrics_names, metrics):
+                    metrics_dict[f'{metrics_name}_unimodal'] += value
+
+                modalitywise_metrics = self._compute_metrics_multiple_inputs(y, pred_y_unimodal)
+                for i in range(self.nummodalities):
+                    names = [f'{x}_{"sar" if i == 0 else "opt"}' for x in self.metrics_names]
+                    for metrics_name, value in zip(names, modalitywise_metrics[i]):
+                        metrics_dict[f'{metrics_name}_unimodal'] += value
+
+                batch_total_time = timeit.default_timer() - batch_begin_time
+
+                batch_logs = {'batch': batch_ind, 'size': step['size'], 'time': batch_total_time,
+                              'batch_begin_time': batch_begin_time, **metrics_dict}
+                eval_callback.on_batch_end(batch_ind, batch_logs)
+
+        def easy_f1(key=None):
+            key = '' if key is None else f'_{key}'
+            tp = metrics_dict[f'tp{key}']
+            fp = metrics_dict[f'fp{key}']
+            fn = metrics_dict[f'fn{key}']
+            return tp / (tp + 0.5 * (fp + fn) + 10e-5)
+
+        f1 = easy_f1()
+        f1_sar = easy_f1('sar')
+        f1_opt = easy_f1('opt')
+        f1_sar_unimodal = easy_f1('sar_unimodal')
+        f1_opt_unimodal = easy_f1('opt_unimodal')
+
+        u_sar = (f1_opt - f1_opt_unimodal) / f1_opt
+        u_opt = (f1_sar - f1_sar_unimodal) / f1_sar
+
+        d_util = u_opt - u_sar
 
     @staticmethod
     def _get_loss(sizes_sum, losses_sum):
