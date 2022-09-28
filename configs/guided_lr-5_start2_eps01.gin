@@ -1,39 +1,29 @@
 # Train configuration
-train.batch_size=4
-train.lr=0.0001
+train.seed=1
+train.batch_size=8
+train.lr=0.00001
 train.wd=0.01
-train.callbacks=['EarlyStopping', 'BiasMitigationStrong']
+train.n_epochs=15
+train.nummodalities=2
+train.other_callbacks=[BiasMitigationStrong']
 
-ReduceLROnPlateauPyTorch.metric='loss'
+ModelCheckpoint.monitor='val_f1'
 
-EarlyStopping.patience=5
-EarlyStopping.monitor='val_f1'
-
-BiasMitigationStrong.epsilon=0.4
+BiasMitigationStrong.epsilon=0.1
 BiasMitigationStrong.curation_windowsize=5
 BiasMitigationStrong.starting_epoch=2
 BiasMitigationStrong.branchnames=['sar', 'opt']
-BiasMitigationStrong.MMTMnames = ['sar', 'opt']
 
-ProgressionCallback.other_metrics=['d_BDR', 'curation_mode', 'caring_modality']
+ProgressionCallback.other_metrics=['d_speed', 'cls_sar', 'cls_opt', 'curation_mode', 'caring_modality']
 
 WBLoggingCallback.on=True
 WBLoggingCallback.log_frequency=100
-WBLoggingCallback.run_name='training_guided'
 WBLoggingCallback.project='balanced_learning_v2'
-WBLoggingCallback.other_metrics=['d_BDR', 'curation_mode', 'caring_modality']
+WBLoggingCallback.other_metrics=['d_speed', 'cls_sar', 'cls_opt', 'curation_mode', 'caring_modality']
 
-# Training loop
-training_loop.nummodalities=2
-training_loop.n_epochs=101
-training_loop.use_gpu=True
-training_loop.device_numbers=[0]
-training_loop.checkpoint_monitor='val_f1'
 
 # Dataset
-get_urbanmappingdata.root_dir = 'C:/Users/shafner/datasets/urban_dataset'
 get_urbanmappingdata.num_workers=0
-get_urbanmappingdata.seed=7
 get_urbanmappingdata.train_sites=['albuquerque', 'atlantaeast', 'atlantawest', 'charlston', 'columbus', 'dallas',
     'denver', 'elpaso', 'houston', 'kansascity', 'lasvegas', 'losangeles', 'miami', 'minneapolis', 'montreal',
     'phoenix', 'quebec', 'saltlakecity', 'sandiego', 'santafe', 'seattle', 'stgeorge', 'toronto', 'tucson',

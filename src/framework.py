@@ -334,6 +334,7 @@ class Framework:
         u_opt = (f1_sar - f1_sar_unimodal) / f1_sar
 
         d_util = u_opt - u_sar
+        print(d_util)
 
     @staticmethod
     def _get_loss(sizes_sum, losses_sum):

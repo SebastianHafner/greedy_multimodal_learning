@@ -57,7 +57,7 @@ def train(config, dataset_path, save_path, lr, wd, batch_size, n_epochs, nummoda
             callbacks.append(clbk)
 
     # default callbacks
-    callbacks.append(avail_callbacks.ModelCheckpoint(save_path, config))
+    callbacks.append(avail_callbacks.ModelCheckpoint(save_path, config, epochs=n_epochs))
     callbacks.append(avail_callbacks.ProgressionCallback())
     callbacks.append(avail_callbacks.WBLoggingCallback(metrics=[m.__name__ for m in metrics], run_name=config))
 
