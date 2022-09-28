@@ -5,7 +5,7 @@ train.lr=0.00001
 train.wd=0.01
 train.n_epochs=15
 train.nummodalities=2
-train.other_callbacks=[BiasMitigationStrong']
+train.other_callbacks=['BiasMitigationStrong']
 
 ModelCheckpoint.monitor='val_f1'
 
