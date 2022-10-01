@@ -5,6 +5,8 @@ import logging
 import copy
 import argh
 import gin
+import json
+from pathlib import Path
 from gin.config import _OPERATIVE_CONFIG
 from gin.config import _CONFIG
 
@@ -116,9 +118,15 @@ def save_weights(model, optimizer, filename):
     torch.save(state, filename)
 
 
-def numpy_to_torch(obj):
-    fn = lambda a: torch.from_numpy(a) if isinstance(a, np.ndarray) else a
-    return _apply(obj, fn)
+def load_json(file: Path):
+    with open(str(file)) as f:
+        d = json.load(f)
+    return d
+
+
+def write_json(file: Path, data):
+    with open(str(file), 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
 
 
 def torch_to_numpy(obj, copy=False):

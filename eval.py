@@ -28,14 +28,14 @@ def load_pretrained_model(model, optimizer, save_path):
 
 
 @gin.configurable
-def eval(config, dataset_path, save_path, batch_size=4, nummodalities=2):
+def eval(config, dataset_path, save_path, batch_size=4, nummodalities=2, model_type='end_training'):
 
     _CONFIG['name'] = config
 
     model = MMTM_DSUNet()
     model = torch.nn.DataParallel(model)
     optimizer = torch.optim.AdamW(model.parameters())
-    pretrained_weights_path = Path(save_path) / 'networks' / f'model_best_val_{config}.pt'
+    pretrained_weights_path = Path(save_path) / 'networks' / f'model_{model_type}_{config}.pt'
     model, optimizer = load_pretrained_model(model, optimizer, pretrained_weights_path)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -59,10 +59,10 @@ def eval(config, dataset_path, save_path, batch_size=4, nummodalities=2):
     if not model.module.mmtm_squeeze_features_recorded():
         callback = avail_callbacks.EvalProgressionCallback(phase='train', steps=len(train))
         model = framework.record_mmtm_features(train, avail_callbacks.CallbackList([callback]))
-        file_name = Path(save_path) / 'networks' / f'model_best_val_{config}.pt'
+        file_name = Path(save_path) / 'networks' / f'model_{model_type}_{config}.pt'
         save_weights(model, optimizer, file_name)
 
-    framework.eval_loop(test, 'test')
+    framework.eval_loop(test, 'test', save_path)
 
 
 if __name__ == "__main__":

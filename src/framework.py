@@ -2,8 +2,10 @@ import numpy as np
 import timeit
 import torch
 import math
+from pathlib import Path
 
 from src.callbacks import EvalProgressionCallback
+from src.utils import write_json
 
 import logging
 logger = logging.getLogger(__name__)
@@ -251,7 +253,7 @@ class Framework:
                 epoch += 1
         return self.model
 
-    def eval_loop(self, eval_generator, phase, *, steps=None) -> dict:
+    def eval_loop(self, eval_generator, phase, save_path, *, steps=None) -> dict:
         self._reset_eval_variables()
 
         if steps is None:
@@ -329,12 +331,23 @@ class Framework:
         f1_opt = easy_f1('opt')
         f1_sar_unimodal = easy_f1('sar_unimodal')
         f1_opt_unimodal = easy_f1('opt_unimodal')
+        cur_sar = (f1_opt - f1_opt_unimodal) / f1_opt
+        cur_opt = (f1_sar - f1_sar_unimodal) / f1_sar
+        d_util = cur_opt - cur_sar
 
-        u_sar = (f1_opt - f1_opt_unimodal) / f1_opt
-        u_opt = (f1_sar - f1_sar_unimodal) / f1_sar
+        results = {
+            'f1': f1,
+            'f1_sar': f1_sar,
+            'f1_opt': f1_opt,
+            'f1_sar_unimodal': f1_sar_unimodal,
+            'f1_opt_unimodal': f1_opt_unimodal,
+            'cur_sar': cur_sar,
+            'cur_opt': cur_opt,
+            'd_util': d_util,
+        }
 
-        d_util = u_opt - u_sar
-        print(d_util)
+        results_file = Path(save_path) / 'results' / f'results_{self.config["name"]}.json'
+        write_json(results_file, results)
 
     @staticmethod
     def _get_loss(sizes_sum, losses_sum):
