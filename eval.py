@@ -56,6 +56,8 @@ def eval(config, dataset_path, save_path, batch_size=4, nummodalities=2, model_t
 
     train, val, test = dataset.get_urbanmappingdata(dataset_path, batch_size=batch_size)
 
+    framework.inference_loop(test, 'test', save_path)
+
     if not model.module.mmtm_squeeze_features_recorded():
         callback = avail_callbacks.EvalProgressionCallback(phase='train', steps=len(train))
         model = framework.record_mmtm_features(train, avail_callbacks.CallbackList([callback]))

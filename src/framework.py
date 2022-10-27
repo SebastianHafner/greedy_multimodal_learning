@@ -4,6 +4,8 @@ import torch
 import math
 from pathlib import Path
 
+import matplotlib.pyplot as plt
+
 from src.callbacks import EvalProgressionCallback
 from src.utils import write_json
 
@@ -403,3 +405,60 @@ class Framework:
         if torch.is_tensor(y) or isinstance(y, np.ndarray):
             return len(y)
         return 1
+
+    def inference_loop(self, eval_generator, phase, save_path, *, steps=None) -> dict:
+
+        steps = len(eval_generator) if steps is None else steps
+
+        name = self.config['name']
+        save_folder = Path(save_path) / 'inference' / name
+        save_folder.mkdir(exist_ok=True)
+
+        self.model.eval()
+        with torch.no_grad():
+            for step_index, (indices, x, y) in enumerate(eval_generator):
+
+                x = [tensor.to(self.device) for tensor in x]
+                y = y.to(self.device)
+
+                pred_y_eval, pred_y = self.model(*x)
+
+                fig, axs = plt.subplots(1, 6, figsize=(30, 5))
+                plt.tight_layout()
+
+                y = y.squeeze().cpu().numpy()
+                axs[0].imshow(y, cmap='gray')
+
+                pred_y_eval = pred_y_eval.squeeze().cpu().numpy() > 0.5
+                axs[1].imshow(pred_y_eval, cmap='gray')
+
+                sar = x[0].squeeze().cpu().numpy().transpose((1, 2, 0))
+                vv, vh = sar[:, :, 0], sar[:, :, 1]
+                sar_rgb =  np.empty((sar.shape[0], sar.shape[1], 3))
+                sar_rgb[:, :, 0] = vv
+                sar_rgb[:, :, 1] = vh
+                sar_rgb[:, :, 2] = vv - vh
+                axs[2].imshow(np.clip(sar_rgb, 0, 1))
+
+                pred_y_sar = pred_y[0].squeeze().cpu().numpy() > 0.5
+                axs[3].imshow(pred_y_sar, cmap='gray')
+
+                opt_rgb = x[1].squeeze().cpu().numpy()[[2, 1, 0],].transpose((1, 2, 0))
+                axs[4].imshow(np.clip(opt_rgb / 0.4, 0, 1))
+
+                pred_y_opt = pred_y[1].squeeze().cpu().numpy() > 0.5
+                axs[5].imshow(pred_y_opt, cmap='gray')
+
+
+
+                for _, ax in np.ndenumerate(axs):
+                    ax.set_xticks([])
+                    ax.set_yticks([])
+
+                save_file = save_folder / f'{name}_{step_index}.png'
+                plt.savefig(save_file, dpi=300, bbox_inches='tight')
+                plt.close(fig)
+
+
+
+
