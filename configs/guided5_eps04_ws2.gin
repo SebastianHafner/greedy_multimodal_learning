@@ -1,0 +1,34 @@
+# Train configuration
+train.seed=50
+train.batch_size=8
+train.lr=0.0001
+train.wd=0.01
+train.n_epochs=15
+train.nummodalities=2
+train.other_callbacks=['BiasMitigationStrong']
+
+ModelCheckpoint.monitor='val_f1'
+
+BiasMitigationStrong.epsilon=0.4
+BiasMitigationStrong.curation_windowsize=2
+BiasMitigationStrong.starting_epoch=1
+BiasMitigationStrong.branchnames=['sar', 'opt']
+
+ProgressionCallback.other_metrics=['d_speed', 'cls_sar', 'cls_opt', 'curation_mode', 'caring_modality']
+
+WBLoggingCallback.on=True
+WBLoggingCallback.log_frequency=100
+WBLoggingCallback.project='balanced_learning_v2'
+WBLoggingCallback.other_metrics=['d_speed', 'cls_sar', 'cls_opt', 'curation_mode', 'caring_modality']
+
+
+# Dataset
+get_urbanmappingdata.num_workers=0
+get_urbanmappingdata.train_sites=['albuquerque', 'atlantaeast', 'atlantawest', 'charlston', 'columbus', 'dallas',
+    'denver', 'elpaso', 'houston', 'kansascity', 'lasvegas', 'losangeles', 'miami', 'minneapolis', 'montreal',
+    'phoenix', 'quebec', 'saltlakecity', 'sandiego', 'santafe', 'seattle', 'stgeorge', 'toronto', 'tucson',
+    'winnipeg', 'sydney']
+get_urbanmappingdata.val_sites=['calgary', 'newyork', 'sanfrancisco', 'vancouver']
+get_urbanmappingdata.test_sites=['spacenet7']
+get_urbanmappingdata.sar_bands=['VV', 'VH']
+get_urbanmappingdata.opt_bands=['B2', 'B3', 'B4', 'B8']
