@@ -60,7 +60,7 @@ def eval(config, dataset_path, save_path, batch_size=4, nummodalities=2, model_t
 
     if not model.module.mmtm_squeeze_features_recorded():
         callback = avail_callbacks.EvalProgressionCallback(phase='train', steps=len(train))
-        model = framework.record_mmtm_features(train, avail_callbacks.CallbackList([callback]))
+        model = framework.record_mmtm_features(train, avail_callbacks.CallbackList([]))
         file_name = Path(save_path) / 'networks' / f'model_{model_type}_{config}.pt'
         save_weights(model, optimizer, file_name)
 
