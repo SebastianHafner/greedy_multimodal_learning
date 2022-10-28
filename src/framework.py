@@ -427,11 +427,11 @@ class Framework:
                 plt.tight_layout()
 
                 y = y.squeeze().cpu().numpy()
-                # np.save(save_folder / f'{name}_{step_index}_gt.npy', y)
+                # np.save(save_folder / f'{name}_{step_index}_gt.npy', y.astype(np.float16))
                 axs[0].imshow(y, cmap='gray')
 
                 pred_y_eval = pred_y_eval.squeeze().cpu().numpy()
-                np.save(save_folder / f'{name}_{step_index}_pred.npy', pred_y_eval)
+                np.save(save_folder / f'{name}_{step_index}_pred.npy', pred_y_eval.astype(np.float16))
                 axs[1].imshow(pred_y_eval > 0.5, cmap='gray')
 
                 sar = x[0].squeeze().cpu().numpy().transpose((1, 2, 0))
@@ -444,7 +444,7 @@ class Framework:
                 axs[2].imshow(np.clip(sar_rgb, 0, 1))
 
                 pred_y_sar = pred_y[0].squeeze().cpu().numpy()
-                np.save(save_folder / f'{name}_{step_index}_pred_sar.npy', pred_y_sar)
+                np.save(save_folder / f'{name}_{step_index}_pred_sar.npy', pred_y_sar.astype(np.float16))
                 axs[3].imshow(pred_y_sar > 0.5, cmap='gray')
 
                 opt_rgb = x[1].squeeze().cpu().numpy()[[2, 1, 0],].transpose((1, 2, 0))
@@ -452,7 +452,7 @@ class Framework:
                 axs[4].imshow(np.clip(opt_rgb / 0.4, 0, 1))
 
                 pred_y_opt = pred_y[1].squeeze().cpu().numpy()
-                np.save(save_folder / f'{name}_{step_index}_pred_opt.npy', pred_y_opt)
+                np.save(save_folder / f'{name}_{step_index}_pred_opt.npy', pred_y_opt.astype(np.float16))
                 axs[5].imshow(pred_y_opt > 0.5, cmap='gray')
 
                 for _, ax in np.ndenumerate(axs):
@@ -460,7 +460,7 @@ class Framework:
                     ax.set_yticks([])
 
                 save_file = save_folder / f'{name}_{step_index}.png'
-                plt.savefig(save_file, dpi=300, bbox_inches='tight')
+                # plt.savefig(save_file, dpi=300, bbox_inches='tight')
                 plt.close(fig)
 
 
