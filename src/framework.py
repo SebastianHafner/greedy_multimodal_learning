@@ -427,7 +427,7 @@ class Framework:
                 plt.tight_layout()
 
                 y = y.squeeze().cpu().numpy()
-                np.save(save_folder / f'{name}_{step_index}_gt.npy', y)
+                # np.save(save_folder / f'{name}_{step_index}_gt.npy', y)
                 axs[0].imshow(y, cmap='gray')
 
                 pred_y_eval = pred_y_eval.squeeze().cpu().numpy()
@@ -435,7 +435,7 @@ class Framework:
                 axs[1].imshow(pred_y_eval > 0.5, cmap='gray')
 
                 sar = x[0].squeeze().cpu().numpy().transpose((1, 2, 0))
-                np.save(save_folder / f'{name}_{step_index}_sar.npy', sar)
+                # np.save(save_folder / f'{name}_{step_index}_sar.npy', sar)
                 vv, vh = sar[:, :, 0], sar[:, :, 1]
                 sar_rgb =  np.empty((sar.shape[0], sar.shape[1], 3))
                 sar_rgb[:, :, 0] = vv
@@ -448,7 +448,7 @@ class Framework:
                 axs[3].imshow(pred_y_sar > 0.5, cmap='gray')
 
                 opt_rgb = x[1].squeeze().cpu().numpy()[[2, 1, 0],].transpose((1, 2, 0))
-                np.save(save_folder / f'{name}_{step_index}_opt.npy', opt_rgb)
+                # np.save(save_folder / f'{name}_{step_index}_opt.npy', opt_rgb)
                 axs[4].imshow(np.clip(opt_rgb / 0.4, 0, 1))
 
                 pred_y_opt = pred_y[1].squeeze().cpu().numpy()
