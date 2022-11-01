@@ -406,7 +406,42 @@ class Framework:
             return len(y)
         return 1
 
-    def inference_loop(self, eval_generator, phase, save_path, *, steps=None) -> dict:
+    def inference_loop(self, eval_generator, phase, save_path, *, steps=None, save_base_layers: bool = False) -> dict:
+
+        name = self.config['name']
+        save_folder = Path(save_path) / 'inference' / name
+        save_folder.mkdir(exist_ok=True)
+
+        self.model.eval()
+        with torch.no_grad():
+            for step_index, (indices, x, y) in enumerate(eval_generator):
+
+                x = [tensor.to(self.device) for tensor in x]
+                y = y.to(self.device)
+
+                if save_base_layers:
+                    y = y.squeeze().cpu().numpy()
+                    np.save(save_folder / f'{name}_{step_index}_gt.npy', y.astype(np.float16))
+
+                    sar = x[0].squeeze().cpu().numpy().transpose((1, 2, 0))
+                    np.save(save_folder / f'{name}_{step_index}_sar.npy', sar)
+
+                    opt_rgb = x[1].squeeze().cpu().numpy()[[2, 1, 0],].transpose((1, 2, 0))
+                    np.save(save_folder / f'{name}_{step_index}_opt.npy', opt_rgb)
+
+                for mmtm_off in [False, True]:
+                    pred_y_eval, pred_y = self.model(*x, mmtm_off=mmtm_off)
+
+                    suffix = '_mmtmoff' if mmtm_off else ''
+
+                    pred_y_eval = pred_y_eval.squeeze().cpu().numpy()
+                    np.save(save_folder / f'{name}_{step_index}_pred{suffix}.npy', pred_y_eval.astype(np.float16))
+                    pred_y_sar = pred_y[0].squeeze().cpu().numpy()
+                    np.save(save_folder / f'{name}_{step_index}_pred_sar{suffix}.npy', pred_y_sar.astype(np.float16))
+                    pred_y_opt = pred_y[1].squeeze().cpu().numpy()
+                    np.save(save_folder / f'{name}_{step_index}_pred_opt{suffix}.npy', pred_y_opt.astype(np.float16))
+
+    def inference_old_loop(self, eval_generator, phase, save_path, *, steps=None) -> dict:
 
         steps = len(eval_generator) if steps is None else steps
 
@@ -437,7 +472,7 @@ class Framework:
                 sar = x[0].squeeze().cpu().numpy().transpose((1, 2, 0))
                 # np.save(save_folder / f'{name}_{step_index}_sar.npy', sar)
                 vv, vh = sar[:, :, 0], sar[:, :, 1]
-                sar_rgb =  np.empty((sar.shape[0], sar.shape[1], 3))
+                sar_rgb = np.empty((sar.shape[0], sar.shape[1], 3))
                 sar_rgb[:, :, 0] = vv
                 sar_rgb[:, :, 1] = vh
                 sar_rgb[:, :, 2] = vv - vh
@@ -462,6 +497,7 @@ class Framework:
                 save_file = save_folder / f'{name}_{step_index}.png'
                 # plt.savefig(save_file, dpi=300, bbox_inches='tight')
                 plt.close(fig)
+
 
 
 
