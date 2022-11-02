@@ -72,7 +72,7 @@ class Framework:
             epoch_begin_time = timeit.default_timer()
 
             self.model.train(True)
-            for step_index, (indices, x, y) in enumerate(train_generator):
+            for step_index, (indices, x, y, labeled) in enumerate(train_generator):
 
                 batch_begin_time = timeit.default_timer()
                 batch_ind = step_index + 1
@@ -88,7 +88,7 @@ class Framework:
                 self.optimizer.zero_grad()
                 pred_y_eval, pred_y = self.model(*x, curation_mode=self.curation_mode,
                                                  caring_modality=self.caring_modality)
-                loss_tensor = self.loss_function(pred_y, y)
+                loss_tensor = self.loss_function(pred_y, y, labeled)
 
                 with torch.no_grad():
                     step['metrics'] = self._compute_metrics(y, pred_y_eval)
@@ -163,7 +163,7 @@ class Framework:
 
         self.model.eval()
         with torch.no_grad():
-            for step_index, (indices, x, y) in enumerate(eval_generator):
+            for step_index, (indices, x, y, labeled) in enumerate(eval_generator):
 
                 batch_begin_time = timeit.default_timer()
                 batch_ind = step_index + 1
@@ -182,7 +182,7 @@ class Framework:
                 y = y.to(self.device)
 
                 pred_y_eval, pred_y = self.model(*x)
-                loss_tensor = self.loss_function(pred_y, y)
+                loss_tensor = self.loss_function(pred_y, y, labeled)
 
                 step['metrics'] = self._compute_metrics(y, pred_y_eval)
                 step['modalitywise_metrics'] = self._compute_metrics_multiple_inputs(y, pred_y)
@@ -225,7 +225,7 @@ class Framework:
                 epoch_begin_time = timeit.default_timer()
                 callback_list.on_epoch_begin(epoch, {})
 
-                for step_index, (indices, x, y) in enumerate(generator):
+                for step_index, (indices, x, y, _) in enumerate(generator):
                     batch_begin_time = timeit.default_timer()
                     batch_ind = step_index + 1
 
