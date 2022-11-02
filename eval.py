@@ -62,7 +62,7 @@ def eval(config, dataset_path, save_path, batch_size=4, nummodalities=2, model_t
         file_name = Path(save_path) / 'networks' / f'model_{model_type}_{config}.pt'
         save_weights(model, optimizer, file_name)
 
-    framework.inference_loop(test, 'test', save_path)
+    # framework.inference_loop(test, 'test', save_path)
     framework.eval_loop(test, 'test', save_path)
 
 

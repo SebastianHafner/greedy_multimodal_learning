@@ -12,7 +12,7 @@ ModelCheckpoint.monitor='val_f1'
 ProgressionCallback.other_metrics=['d_speed', 'cls_sar', 'cls_opt', 'curation_mode', 'caring_modality']
 
 WBLoggingCallback.on=True
-WBLoggingCallback.log_frequency=1000
+WBLoggingCallback.log_frequency=100
 WBLoggingCallback.project='balanced_learning_v2'
 WBLoggingCallback.other_metrics=['d_speed', 'cls_sar', 'cls_opt', 'curation_mode', 'caring_modality']
 

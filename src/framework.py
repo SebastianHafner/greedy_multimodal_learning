@@ -272,7 +272,7 @@ class Framework:
 
         self.model.eval()
         with torch.no_grad():
-            for step_index, (indices, x, y) in enumerate(eval_generator):
+            for step_index, (indices, x, y, labeled) in enumerate(eval_generator):
 
                 batch_begin_time = timeit.default_timer()
                 batch_ind = step_index + 1
@@ -321,32 +321,45 @@ class Framework:
                               'batch_begin_time': batch_begin_time, **metrics_dict}
                 eval_callback.on_batch_end(batch_ind, batch_logs)
 
+        results = {}
+
         def easy_f1(key=None):
             key = '' if key is None else f'_{key}'
-            tp = metrics_dict[f'tp{key}']
-            fp = metrics_dict[f'fp{key}']
-            fn = metrics_dict[f'fn{key}']
+            tp, fp, fn = metrics_dict[f'tp{key}'], metrics_dict[f'fp{key}'], metrics_dict[f'fn{key}']
             return tp / (tp + 0.5 * (fp + fn) + 10e-5)
 
-        f1 = easy_f1()
-        f1_sar = easy_f1('sar')
-        f1_opt = easy_f1('opt')
-        f1_sar_unimodal = easy_f1('sar_unimodal')
-        f1_opt_unimodal = easy_f1('opt_unimodal')
-        cur_sar = (f1_opt - f1_opt_unimodal) / f1_opt
-        cur_opt = (f1_sar - f1_sar_unimodal) / f1_sar
-        d_util = cur_opt - cur_sar
+        def easy_precision(key=None):
+            key = '' if key is None else f'_{key}'
+            tp, fp, fn = metrics_dict[f'tp{key}'], metrics_dict[f'fp{key}'], metrics_dict[f'fn{key}']
+            return tp / (tp + fp)
 
-        results = {
-            'f1': f1,
-            'f1_sar': f1_sar,
-            'f1_opt': f1_opt,
-            'f1_sar_unimodal': f1_sar_unimodal,
-            'f1_opt_unimodal': f1_opt_unimodal,
-            'cur_sar': cur_sar,
-            'cur_opt': cur_opt,
-            'd_util': d_util,
-        }
+        def easy_recall(key=None):
+            key = '' if key is None else f'_{key}'
+            tp, fp, fn = metrics_dict[f'tp{key}'], metrics_dict[f'fp{key}'], metrics_dict[f'fn{key}']
+            return tp / (tp + fn)
+
+        for metric_func, metric_name in (zip([easy_f1, easy_precision, easy_recall], ['f1', 'recall', 'precision'])):
+            a = metric_func()
+            a_sar = metric_func('sar')
+            a_opt = metric_func('opt')
+            a_sar_unimodal = metric_func('sar_unimodal')
+            a_opt_unimodal = metric_func('opt_unimodal')
+            a_cur_sar = (a_opt - a_opt_unimodal) / a_opt
+            a_cur_opt = (a_sar - a_sar_unimodal) / a_sar
+            a_d_util = a_cur_opt - a_cur_sar
+
+            metric_results = {
+                f'{metric_name}': a,
+                f'{metric_name}_sar': a_sar,
+                f'{metric_name}_opt': a_opt,
+                f'{metric_name}_sar_unimodal': a_sar_unimodal,
+                f'{metric_name}_opt_unimodal': a_opt_unimodal,
+                f'{metric_name}_cur_sar': a_cur_sar,
+                f'{metric_name}_cur_opt': a_cur_opt,
+                f'{metric_name}_d_util': a_d_util,
+            }
+
+            results.update(metric_results)
 
         results_file = Path(save_path) / 'results' / f'results_{self.config["name"]}.json'
         write_json(results_file, results)
@@ -414,7 +427,7 @@ class Framework:
 
         self.model.eval()
         with torch.no_grad():
-            for step_index, (indices, x, y) in enumerate(eval_generator):
+            for step_index, (indices, x, y, labeled) in enumerate(eval_generator):
 
                 x = [tensor.to(self.device) for tensor in x]
                 y = y.to(self.device)
