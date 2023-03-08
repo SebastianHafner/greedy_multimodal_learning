@@ -168,7 +168,7 @@ class MMTM(nn.Module):
             ravg_squeeze_sar = self.ravg_squeeze_sar.expand(opt.shape[0], -1)
             squeeze_unimodal_opt = torch.cat([ravg_squeeze_sar, squeeze_opt], 1)
             excitation_unimodal_opt = self.relu(self.fc_squeeze(squeeze_unimodal_opt))
-            opt_out = self.fc_sar(excitation_unimodal_opt)
+            opt_out = self.fc_opt(excitation_unimodal_opt)
 
         sar_out = self.sigmoid(sar_out)
         opt_out = self.sigmoid(opt_out)
